@@ -29,6 +29,35 @@ export interface AuthFileItem {
   runtimeOnly?: boolean | string;
   disabled?: boolean;
   unavailable?: boolean;
+  cooling?: boolean;
+  cooldown_until?: string | number;
+  cooldownUntil?: string | number;
+  cooldown_remaining_seconds?: number;
+  cooldownRemainingSeconds?: number;
+  cooldown_reason?: string;
+  cooldownReason?: string;
+  quota?: {
+    exceeded?: boolean;
+    reason?: string;
+    next_recover_at?: string | number;
+    nextRecoverAt?: string | number;
+    backoff_level?: number;
+    backoffLevel?: number;
+  };
+  last_error?: {
+    code?: string;
+    message?: string;
+    retryable?: boolean;
+    http_status?: number;
+    httpStatus?: number;
+  };
+  lastError?: {
+    code?: string;
+    message?: string;
+    retryable?: boolean;
+    http_status?: number;
+    httpStatus?: number;
+  };
   status?: string;
   statusMessage?: string;
   lastRefresh?: string | number;

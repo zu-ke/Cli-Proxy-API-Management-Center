@@ -19,6 +19,7 @@ import { usePageTransitionLayer } from '@/components/common/PageTransitionLayer'
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
+import { Modal } from '@/components/ui/Modal';
 import { Select } from '@/components/ui/Select';
 import { IconFilterAll, IconSearch } from '@/components/ui/icons';
 import { EmptyState } from '@/components/ui/EmptyState';
@@ -157,6 +158,11 @@ export function AuthFilesPage() {
     failed: 0,
   });
   const [uiStateHydrated, setUiStateHydrated] = useState(false);
+  const [cooldownEditor, setCooldownEditor] = useState<{
+    file: AuthFileItem;
+    minutes: string;
+    reason: string;
+  } | null>(null);
   const floatingBatchActionsRef = useRef<HTMLDivElement>(null);
   const batchActionAnimationRef = useRef<AnimationPlaybackControlsWithThen | null>(null);
   const previousSelectionCountRef = useRef(0);
@@ -173,6 +179,7 @@ export function AuthFilesPage() {
     deletingAll,
     statusUpdating,
     batchStatusUpdating,
+    cooldownUpdating,
     fileInputRef,
     loadFiles,
     handleUploadClick,
@@ -181,6 +188,8 @@ export function AuthFilesPage() {
     handleDeleteAll,
     handleDownload,
     handleStatusToggle,
+    handleCooldownSet,
+    handleCooldownClear,
     toggleSelect,
     selectAllVisible,
     invertVisibleSelection,
@@ -663,6 +672,39 @@ export function AuthFilesPage() {
     [bulkQuotaState.running, disableControls, showNotification, t]
   );
 
+  const openCooldownEditor = useCallback((file: AuthFileItem) => {
+    setCooldownEditor({
+      file,
+      minutes: '30',
+      reason: 'manual_cooldown',
+    });
+  }, []);
+
+  const closeCooldownEditor = useCallback(() => {
+    setCooldownEditor(null);
+  }, []);
+
+  const submitCooldownEditor = useCallback(async () => {
+    if (!cooldownEditor) return;
+    const minutes = Number(cooldownEditor.minutes);
+    if (!Number.isFinite(minutes) || minutes <= 0) {
+      showNotification(
+        t('auth_files.cooldown_invalid_duration', {
+          defaultValue: 'Cooldown duration must be greater than 0',
+        }),
+        'warning'
+      );
+      return;
+    }
+    await handleCooldownSet(
+      cooldownEditor.file,
+      Math.round(minutes * 60),
+      cooldownEditor.reason.trim() || 'manual_cooldown'
+    );
+    closeCooldownEditor();
+    void loadFiles().catch(() => {});
+  }, [closeCooldownEditor, cooldownEditor, handleCooldownSet, loadFiles, showNotification, t]);
+
   const openExcludedEditor = useCallback(
     (provider?: string) => {
       const providerValue = (provider || (filter !== 'all' ? String(filter) : '')).trim();
@@ -873,6 +915,16 @@ export function AuthFilesPage() {
               {t('common.refresh')}
             </Button>
             <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => void refreshQuotaTargets(allQuotaTargets, 'all')}
+              disabled={disableControls || bulkQuotaState.running || allQuotaTargets.length === 0}
+            >
+              {t('auth_files.batch_refresh_all_quota', {
+                defaultValue: 'Refresh all quota',
+              })}
+            </Button>
+            <Button
               size="sm"
               onClick={handleUploadClick}
               disabled={disableControls || uploading}
@@ -1030,11 +1082,14 @@ export function AuthFilesPage() {
                     disableControls={disableControls}
                     deleting={deleting}
                     statusUpdating={statusUpdating}
+                    cooldownUpdating={cooldownUpdating}
                     quotaFilterType={quotaFilterType}
                     statusBarCache={statusBarCache}
                     onShowModels={showModels}
                     onDownload={handleDownload}
                     onOpenPrefixProxyEditor={openPrefixProxyEditor}
+                    onOpenCooldownEditor={openCooldownEditor}
+                    onCooldownClear={handleCooldownClear}
                     onDelete={handleDelete}
                     onToggleStatus={handleStatusToggle}
                     onToggleSelect={toggleSelect}
@@ -1122,6 +1177,72 @@ export function AuthFilesPage() {
         onSave={handlePrefixProxySave}
         onChange={handlePrefixProxyChange}
       />
+
+      <Modal
+        open={Boolean(cooldownEditor)}
+        title={t('auth_files.cooldown_modal_title', { defaultValue: 'Set cooldown' })}
+        onClose={closeCooldownEditor}
+        width={420}
+        footer={
+          <>
+            <Button variant="secondary" onClick={closeCooldownEditor}>
+              {t('common.cancel')}
+            </Button>
+            <Button onClick={() => void submitCooldownEditor()}>
+              {t('common.confirm')}
+            </Button>
+          </>
+        }
+      >
+        {cooldownEditor && (
+          <div className={styles.cooldownForm}>
+            <div className={styles.cooldownTarget} title={cooldownEditor.file.name}>
+              {cooldownEditor.file.name}
+            </div>
+            <Input
+              type="number"
+              min={1}
+              step={1}
+              value={cooldownEditor.minutes}
+              label={t('auth_files.cooldown_minutes_label', {
+                defaultValue: 'Duration (minutes)',
+              })}
+              onChange={(event) =>
+                setCooldownEditor((current) =>
+                  current ? { ...current, minutes: event.target.value } : current
+                )
+              }
+            />
+            <Input
+              value={cooldownEditor.reason}
+              label={t('auth_files.cooldown_reason_label', {
+                defaultValue: 'Reason',
+              })}
+              onChange={(event) =>
+                setCooldownEditor((current) =>
+                  current ? { ...current, reason: event.target.value } : current
+                )
+              }
+            />
+            <div className={styles.cooldownQuickActions}>
+              {[30, 120, 1440].map((minutes) => (
+                <Button
+                  key={minutes}
+                  variant="secondary"
+                  size="sm"
+                  onClick={() =>
+                    setCooldownEditor((current) =>
+                      current ? { ...current, minutes: String(minutes) } : current
+                    )
+                  }
+                >
+                  {minutes >= 1440 ? '24h' : `${minutes}m`}
+                </Button>
+              ))}
+            </div>
+          </div>
+        )}
+      </Modal>
 
       {batchActionBarVisible && typeof document !== 'undefined'
         ? createPortal(

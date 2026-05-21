@@ -4,10 +4,12 @@ import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { SelectionCheckbox } from '@/components/ui/SelectionCheckbox';
 import { ToggleSwitch } from '@/components/ui/ToggleSwitch';
 import {
+  IconCheck,
   IconDownload,
   IconInfo,
   IconModelCluster,
   IconSettings,
+  IconTimer,
   IconTrash2,
 } from '@/components/ui/icons';
 import { ProviderStatusBar } from '@/components/providers/ProviderStatusBar';
@@ -47,11 +49,14 @@ export type AuthFileCardProps = {
   disableControls: boolean;
   deleting: string | null;
   statusUpdating: Record<string, boolean>;
+  cooldownUpdating: Record<string, boolean>;
   quotaFilterType: QuotaProviderType | null;
   statusBarCache: Map<string, AuthFileStatusBarData>;
   onShowModels: (file: AuthFileItem) => void;
   onDownload: (name: string) => void;
   onOpenPrefixProxyEditor: (file: AuthFileItem) => void;
+  onOpenCooldownEditor: (file: AuthFileItem) => void;
+  onCooldownClear: (file: AuthFileItem) => void;
   onDelete: (name: string) => void;
   onToggleStatus: (file: AuthFileItem, enabled: boolean) => void;
   onToggleSelect: (name: string) => void;
@@ -73,11 +78,14 @@ export function AuthFileCard(props: AuthFileCardProps) {
     disableControls,
     deleting,
     statusUpdating,
+    cooldownUpdating,
     quotaFilterType,
     statusBarCache,
     onShowModels,
     onDownload,
     onOpenPrefixProxyEditor,
+    onOpenCooldownEditor,
+    onCooldownClear,
     onDelete,
     onToggleStatus,
     onToggleSelect,
@@ -95,9 +103,54 @@ export function AuthFileCard(props: AuthFileCardProps) {
   const typeColor = getTypeColor(providerKey, resolvedTheme);
   const typeLabel = getTypeLabel(t, providerKey);
   const providerIcon = getAuthFileIcon(providerKey, resolvedTheme);
+  const rawCooldownUntil =
+    file.cooldown_until ??
+    file.cooldownUntil ??
+    file.quota?.next_recover_at ??
+    file.quota?.nextRecoverAt;
+  const cooldownUntilMs = (() => {
+    if (typeof rawCooldownUntil === 'number' && Number.isFinite(rawCooldownUntil)) {
+      return rawCooldownUntil < 1e12 ? rawCooldownUntil * 1000 : rawCooldownUntil;
+    }
+    if (typeof rawCooldownUntil === 'string') {
+      const trimmed = rawCooldownUntil.trim();
+      if (!trimmed) return 0;
+      const numeric = Number(trimmed);
+      if (Number.isFinite(numeric)) return numeric < 1e12 ? numeric * 1000 : numeric;
+      const parsed = Date.parse(trimmed);
+      return Number.isNaN(parsed) ? 0 : parsed;
+    }
+    return 0;
+  })();
+  const cooldownRemainingSeconds = Math.max(
+    0,
+    Number(file.cooldown_remaining_seconds ?? file.cooldownRemainingSeconds ?? 0) || 0
+  );
+  const isCooling = file.cooling === true || cooldownRemainingSeconds > 0 || Boolean(file.unavailable && cooldownUntilMs > 0);
+  const cooldownReason = String(
+    file.cooldown_reason ?? file.cooldownReason ?? file.quota?.reason ?? ''
+  ).trim();
+  const cooldownUntilText =
+    cooldownUntilMs > 0
+      ? new Intl.DateTimeFormat(undefined, {
+          month: '2-digit',
+          day: '2-digit',
+          hour: '2-digit',
+          minute: '2-digit',
+        }).format(new Date(cooldownUntilMs))
+      : '';
+  const cooldownDurationText = (() => {
+    if (cooldownRemainingSeconds <= 0) return '';
+    const hours = Math.floor(cooldownRemainingSeconds / 3600);
+    const minutes = Math.ceil((cooldownRemainingSeconds % 3600) / 60);
+    if (hours > 0) return `${hours}h ${minutes}m`;
+    return `${Math.max(1, minutes)}m`;
+  })();
 
   const quotaType =
-    quotaFilterType && resolveQuotaType(file) === quotaFilterType ? quotaFilterType : null;
+    quotaFilterType && resolveQuotaType(file) === quotaFilterType
+      ? quotaFilterType
+      : resolveQuotaType(file);
 
   const showQuotaLayout = Boolean(quotaType) && !isRuntimeOnly && !compact;
 
@@ -129,6 +182,8 @@ export function AuthFileCard(props: AuthFileCardProps) {
     ? t('auth_files.type_virtual') || '虚拟认证文件'
     : file.disabled
       ? t('auth_files.health_status_disabled')
+      : isCooling
+        ? t('auth_files.health_status_cooling', { defaultValue: 'Cooling' })
       : hasStatusWarning
         ? t('auth_files.health_status_warning')
         : rawStatusMessage
@@ -138,6 +193,8 @@ export function AuthFileCard(props: AuthFileCardProps) {
     ? styles.stateBadgeVirtual
     : file.disabled
       ? styles.stateBadgeDisabled
+      : isCooling
+        ? styles.stateBadgeWarning
       : hasStatusWarning
         ? styles.stateBadgeWarning
         : styles.stateBadgeActive;
@@ -230,6 +287,20 @@ export function AuthFileCard(props: AuthFileCardProps) {
             </div>
           )}
 
+          {isCooling && (
+            <div className={styles.cooldownInfo}>
+              <IconTimer className={styles.messageIcon} size={14} />
+              <span>
+                {t('auth_files.cooldown_info', {
+                  duration: cooldownDurationText,
+                  until: cooldownUntilText,
+                  reason: cooldownReason || '-',
+                  defaultValue: 'Cooling {{duration}} · until {{until}} · {{reason}}',
+                })}
+              </span>
+            </div>
+          )}
+
           <div className={`${styles.cardInsights} ${compact ? styles.cardInsightsCompact : ''}`}>
             <div className={`${styles.cardStats} ${compact ? styles.cardStatsCompact : ''}`}>
               <div className={`${styles.statPill} ${styles.statSuccess}`}>
@@ -301,6 +372,32 @@ export function AuthFileCard(props: AuthFileCardProps) {
                   >
                     <IconSettings className={styles.actionIcon} size={16} />
                   </Button>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => onOpenCooldownEditor(file)}
+                    className={styles.iconButton}
+                    title={t('auth_files.cooldown_set_button', {
+                      defaultValue: 'Set cooldown',
+                    })}
+                    disabled={disableControls || cooldownUpdating[file.name] === true}
+                  >
+                    <IconTimer className={styles.actionIcon} size={16} />
+                  </Button>
+                  {isCooling && (
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => onCooldownClear(file)}
+                      className={styles.iconButton}
+                      title={t('auth_files.cooldown_clear_button', {
+                        defaultValue: 'Unfreeze now',
+                      })}
+                      disabled={disableControls || cooldownUpdating[file.name] === true}
+                    >
+                      <IconCheck className={styles.actionIcon} size={16} />
+                    </Button>
+                  )}
                   <Button
                     variant="danger"
                     size="sm"

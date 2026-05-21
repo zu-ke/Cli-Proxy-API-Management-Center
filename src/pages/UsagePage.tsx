@@ -12,10 +12,12 @@ import {
   IconSlidersHorizontal,
 } from '@/components/ui/icons';
 import { useHeaderRefresh } from '@/hooks/useHeaderRefresh';
-import { apiKeyUsageApi } from '@/services/api';
+import { apiKeyUsageApi, authFilesApi } from '@/services/api';
 import { useAuthStore } from '@/stores';
+import type { AuthFileItem } from '@/types';
 import {
   normalizeRecentRequestUsageEntry,
+  normalizeUsageTotal,
   statusBarDataFromRecentRequests,
   type ApiKeyUsageResponse,
   type RecentRequestUsageEntry,
@@ -29,6 +31,7 @@ type SortKey = 'total' | 'failed' | 'successRate' | 'provider';
 interface UsageRow {
   id: string;
   provider: string;
+  source: 'api_key' | 'auth_file';
   baseUrl: string;
   apiKey: string;
   maskedApiKey: string;
@@ -99,6 +102,7 @@ const buildUsageRows = (payload: ApiKeyUsageResponse): UsageRow[] => {
       return {
         id: `${provider}::${compositeKey}`,
         provider,
+        source: 'api_key',
         baseUrl,
         apiKey,
         maskedApiKey: maskApiKey(apiKey),
@@ -113,6 +117,45 @@ const buildUsageRows = (payload: ApiKeyUsageResponse): UsageRow[] => {
     });
   });
 };
+
+const buildAuthFileUsageRows = (files: AuthFileItem[]): UsageRow[] =>
+  files.flatMap((file) => {
+    const provider = normalizeProviderKey(String(file.provider ?? file.type ?? 'unknown'));
+    if (!provider) return [];
+
+    const usage = normalizeRecentRequestUsageEntry({
+      success: file.success,
+      failed: file.failed,
+      recent_requests: file.recent_requests ?? file.recentRequests,
+    });
+    const success = normalizeUsageTotal(usage.success);
+    const failed = normalizeUsageTotal(usage.failed);
+    const total = success + failed;
+    if (total === 0) return [];
+
+    const account = String(file.account ?? file.email ?? file.name ?? '').trim();
+    const accountType = String(file.account_type ?? 'auth file').trim();
+    const credential = account || file.name;
+    const trend = statusBarDataFromRecentRequests(usage.recentRequests);
+
+    return [
+      {
+        id: `auth-file::${provider}::${file.name}`,
+        provider,
+        source: 'auth_file' as const,
+        baseUrl: accountType || 'auth file',
+        apiKey: credential,
+        maskedApiKey: credential,
+        success,
+        failed,
+        total,
+        successRate: total > 0 ? (success / total) * 100 : 100,
+        status: resolveStatus(success, failed),
+        trendBlocks: trend.blocks,
+        usage,
+      },
+    ];
+  });
 
 const formatNumber = (value: number): string => new Intl.NumberFormat().format(value);
 
@@ -142,8 +185,14 @@ export function UsagePage() {
     setLoading(true);
     setError('');
     try {
-      const payload = await apiKeyUsageApi.getUsage();
-      setRows(buildUsageRows(payload));
+      const [apiKeyPayload, authFilePayload] = await Promise.all([
+        apiKeyUsageApi.getUsage(),
+        authFilesApi.list(),
+      ]);
+      setRows([
+        ...buildUsageRows(apiKeyPayload),
+        ...buildAuthFileUsageRows(authFilePayload.files ?? []),
+      ]);
     } catch (err: unknown) {
       setError(
         getErrorMessage(err, t('notification.refresh_failed', { defaultValue: 'Refresh failed' }))
@@ -301,7 +350,7 @@ export function UsagePage() {
               value={searchQuery}
               onChange={(event) => setSearchQuery(event.target.value)}
               placeholder={t('usage.search_placeholder', {
-                defaultValue: 'Search base_url or API key',
+                defaultValue: 'Search scope or credential',
               })}
               className={styles.searchInput}
               rightElement={<IconSearch size={16} className={styles.searchIcon} />}
@@ -377,7 +426,7 @@ export function UsagePage() {
           <EmptyState
             title={t('usage.empty_title', { defaultValue: 'No usage records' })}
             description={t('usage.empty_desc', {
-              defaultValue: 'Usage statistics will appear after API keys receive traffic.',
+              defaultValue: 'Usage statistics will appear after credentials receive traffic.',
             })}
             action={
               <Button
@@ -408,10 +457,10 @@ export function UsagePage() {
                 {t('usage.columns.provider', { defaultValue: 'Provider' })}
               </span>
               <span role="columnheader">
-                {t('usage.columns.base_url', { defaultValue: 'base_url' })}
+                {t('usage.columns.scope', { defaultValue: 'Scope' })}
               </span>
               <span role="columnheader">
-                {t('usage.columns.api_key', { defaultValue: 'API key' })}
+                {t('usage.columns.credential', { defaultValue: 'Credential' })}
               </span>
               <span role="columnheader">
                 {t('usage.columns.success', { defaultValue: 'Success' })}
@@ -434,6 +483,11 @@ export function UsagePage() {
                     aria-hidden="true"
                   />
                   <span className={styles.providerName}>{row.provider}</span>
+                  <span className={styles.sourceBadge}>
+                    {row.source === 'auth_file'
+                      ? t('usage.source.auth_file', { defaultValue: 'Auth' })
+                      : t('usage.source.api_key', { defaultValue: 'Key' })}
+                  </span>
                   <span className={[styles.statusBadge, styles[row.status]].join(' ')}>
                     {t(`usage.status.${row.status}`, {
                       defaultValue: row.status,

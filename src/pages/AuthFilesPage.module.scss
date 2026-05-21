@@ -1073,6 +1073,20 @@
   word-break: break-word;
 }
 
+.cooldownInfo {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, var(--warning-border) 55%, transparent);
+  border-radius: 8px;
+  background-color: color-mix(in srgb, var(--warning-bg) 48%, transparent);
+  color: var(--warning-text);
+  font-size: 11px;
+  line-height: 1.35;
+  word-break: break-word;
+}
+
 .messageIcon {
   flex-shrink: 0;
   margin-top: 1px;
@@ -1547,6 +1561,34 @@
 
 .actionIcon {
   display: block;
+}
+
+.cooldownForm {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.cooldownTarget {
+  min-width: 0;
+  overflow: hidden;
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, var(--border-color) 70%, transparent);
+  border-radius: 8px;
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  font-family:
+    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New',
+    monospace;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cooldownQuickActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 @include mobile {

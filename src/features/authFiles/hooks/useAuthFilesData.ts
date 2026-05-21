@@ -34,6 +34,7 @@ export type UseAuthFilesDataResult = {
   deletingAll: boolean;
   statusUpdating: Record<string, boolean>;
   batchStatusUpdating: boolean;
+  cooldownUpdating: Record<string, boolean>;
   fileInputRef: RefObject<HTMLInputElement | null>;
   loadFiles: () => Promise<void>;
   handleUploadClick: () => void;
@@ -42,6 +43,8 @@ export type UseAuthFilesDataResult = {
   handleDeleteAll: (options: DeleteAllOptions) => void;
   handleDownload: (name: string) => Promise<void>;
   handleStatusToggle: (item: AuthFileItem, enabled: boolean) => Promise<void>;
+  handleCooldownSet: (item: AuthFileItem, durationSeconds: number, reason?: string) => Promise<void>;
+  handleCooldownClear: (item: AuthFileItem) => Promise<void>;
   toggleSelect: (name: string) => void;
   selectAllVisible: (visibleFiles: AuthFileItem[]) => void;
   invertVisibleSelection: (visibleFiles: AuthFileItem[]) => void;
@@ -63,6 +66,7 @@ export function useAuthFilesData(): UseAuthFilesDataResult {
   const [deletingAll, setDeletingAll] = useState(false);
   const [statusUpdating, setStatusUpdating] = useState<Record<string, boolean>>({});
   const [batchStatusUpdating, setBatchStatusUpdating] = useState(false);
+  const [cooldownUpdating, setCooldownUpdating] = useState<Record<string, boolean>>({});
   const [selectedFiles, setSelectedFiles] = useState<Set<string>>(new Set());
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -465,6 +469,110 @@ export function useAuthFilesData(): UseAuthFilesDataResult {
     [showNotification, t]
   );
 
+  const handleCooldownSet = useCallback(
+    async (item: AuthFileItem, durationSeconds: number, reason?: string) => {
+      const name = item.name;
+      const normalizedDuration = Math.max(1, Math.round(durationSeconds));
+      setCooldownUpdating((prev) => ({ ...prev, [name]: true }));
+
+      try {
+        const res = await authFilesApi.setCooldown(name, normalizedDuration, reason);
+        const cooldownUntil = res.cooldown_until;
+        const cooldownReason = res.cooldown_reason || reason || 'manual_cooldown';
+        setFiles((prev) =>
+          prev.map((file) =>
+            file.name === name
+              ? {
+                  ...file,
+                  unavailable: true,
+                  cooling: true,
+                  cooldown_until: cooldownUntil,
+                  cooldown_remaining_seconds: res.cooldown_remaining_seconds ?? normalizedDuration,
+                  cooldown_reason: cooldownReason,
+                  quota: {
+                    ...(file.quota ?? {}),
+                    exceeded: true,
+                    reason: cooldownReason,
+                    next_recover_at: cooldownUntil,
+                  },
+                }
+              : file
+          )
+        );
+        showNotification(
+          t('auth_files.cooldown_set_success', {
+            name,
+            defaultValue: 'Cooldown set for "{{name}}"',
+          }),
+          'success'
+        );
+      } catch (err: unknown) {
+        const errorMessage = err instanceof Error ? err.message : '';
+        showNotification(`${t('notification.update_failed')}: ${errorMessage}`, 'error');
+      } finally {
+        setCooldownUpdating((prev) => {
+          const next = { ...prev };
+          delete next[name];
+          return next;
+        });
+      }
+    },
+    [showNotification, t]
+  );
+
+  const handleCooldownClear = useCallback(
+    async (item: AuthFileItem) => {
+      const name = item.name;
+      setCooldownUpdating((prev) => ({ ...prev, [name]: true }));
+
+      try {
+        await authFilesApi.clearCooldown(name);
+        setFiles((prev) =>
+          prev.map((file) => {
+            if (file.name !== name) return file;
+            return {
+              ...file,
+              unavailable: false,
+              cooling: false,
+              status: file.disabled ? 'disabled' : 'active',
+              cooldown_until: undefined,
+              cooldownUntil: undefined,
+              cooldown_remaining_seconds: undefined,
+              cooldownRemainingSeconds: undefined,
+              cooldown_reason: undefined,
+              cooldownReason: undefined,
+              status_message: '',
+              statusMessage: '',
+              last_error: undefined,
+              lastError: undefined,
+              quota: {
+                ...(file.quota ?? {}),
+                exceeded: false,
+              },
+            };
+          })
+        );
+        showNotification(
+          t('auth_files.cooldown_clear_success', {
+            name,
+            defaultValue: 'Cooldown cleared for "{{name}}"',
+          }),
+          'success'
+        );
+      } catch (err: unknown) {
+        const errorMessage = err instanceof Error ? err.message : '';
+        showNotification(`${t('notification.update_failed')}: ${errorMessage}`, 'error');
+      } finally {
+        setCooldownUpdating((prev) => {
+          const next = { ...prev };
+          delete next[name];
+          return next;
+        });
+      }
+    },
+    [showNotification, t]
+  );
+
   const batchSetStatus = useCallback(
     async (names: string[], enabled: boolean) => {
       if (batchStatusPendingRef.current) return;
@@ -645,6 +753,7 @@ export function useAuthFilesData(): UseAuthFilesDataResult {
     deletingAll,
     statusUpdating,
     batchStatusUpdating,
+    cooldownUpdating,
     fileInputRef,
     loadFiles,
     handleUploadClick,
@@ -653,6 +762,8 @@ export function useAuthFilesData(): UseAuthFilesDataResult {
     handleDeleteAll,
     handleDownload,
     handleStatusToggle,
+    handleCooldownSet,
+    handleCooldownClear,
     toggleSelect,
     selectAllVisible,
     invertVisibleSelection,
