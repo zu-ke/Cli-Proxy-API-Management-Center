@@ -2,17 +2,12 @@ import {
   useCallback,
   type CSSProperties,
   useEffect,
-  useLayoutEffect,
   useMemo,
-  useRef,
   useState,
   type ChangeEvent,
 } from 'react';
-import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
-import { animate } from 'motion/mini';
-import type { AnimationPlaybackControlsWithThen } from 'motion-dom';
 import { useInterval } from '@/hooks/useInterval';
 import { useHeaderRefresh } from '@/hooks/useHeaderRefresh';
 import { usePageTransitionLayer } from '@/components/common/PageTransitionLayer';
@@ -71,10 +66,6 @@ import {
 import { useAuthStore, useNotificationStore, useQuotaStore, useThemeStore } from '@/stores';
 import styles from './AuthFilesPage.module.scss';
 
-const easePower3Out = (progress: number) => 1 - (1 - progress) ** 4;
-const easePower2In = (progress: number) => progress ** 3;
-const BATCH_BAR_BASE_TRANSFORM = 'translateX(-50%)';
-const BATCH_BAR_HIDDEN_TRANSFORM = 'translateX(-50%) translateY(56px)';
 const DEFAULT_REGULAR_PAGE_SIZE = 9;
 const DEFAULT_COMPACT_PAGE_SIZE = 12;
 const BULK_QUOTA_CONCURRENCY = 6;
@@ -141,7 +132,6 @@ export function AuthFilesPage() {
   const [pageSizeInput, setPageSizeInput] = useState('9');
   const [viewMode, setViewMode] = useState<'diagram' | 'list'>('list');
   const [sortMode, setSortMode] = useState<AuthFilesSortMode>('default');
-  const [batchActionBarVisible, setBatchActionBarVisible] = useState(false);
   const [bulkQuotaState, setBulkQuotaState] = useState<{
     running: boolean;
     scope: 'selected' | 'filtered' | 'all' | null;
@@ -163,10 +153,7 @@ export function AuthFilesPage() {
     minutes: string;
     reason: string;
   } | null>(null);
-  const floatingBatchActionsRef = useRef<HTMLDivElement>(null);
-  const batchActionAnimationRef = useRef<AnimationPlaybackControlsWithThen | null>(null);
-  const previousSelectionCountRef = useRef(0);
-  const selectionCountRef = useRef(0);
+  const [failureReasonFile, setFailureReasonFile] = useState<AuthFileItem | null>(null);
 
   const {
     files,
@@ -487,7 +474,7 @@ export function AuthFilesPage() {
       copy.sort((a, b) => {
         const pa = parsePriorityValue(a.priority ?? a['priority']) ?? 0;
         const pb = parsePriorityValue(b.priority ?? b['priority']) ?? 0;
-        return pb - pa; // 高优先级排前面
+        return pb - pa;
       });
     }
     return copy;
@@ -735,94 +722,156 @@ export function AuthFilesPage() {
     [filter, navigate]
   );
 
-  useLayoutEffect(() => {
-    if (typeof window === 'undefined') return;
+  const openFailureReasons = useCallback((file: AuthFileItem) => {
+    setFailureReasonFile(file);
+  }, []);
 
-    const actionsEl = floatingBatchActionsRef.current;
-    if (!actionsEl) {
-      document.documentElement.style.removeProperty('--auth-files-action-bar-height');
-      return;
-    }
+  const closeFailureReasons = useCallback(() => {
+    setFailureReasonFile(null);
+  }, []);
 
-    const updatePadding = () => {
-      const height = actionsEl.getBoundingClientRect().height;
-      document.documentElement.style.setProperty('--auth-files-action-bar-height', `${height}px`);
-    };
-
-    updatePadding();
-    window.addEventListener('resize', updatePadding);
-
-    const ro = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(updatePadding);
-    ro?.observe(actionsEl);
-
-    return () => {
-      ro?.disconnect();
-      window.removeEventListener('resize', updatePadding);
-      document.documentElement.style.removeProperty('--auth-files-action-bar-height');
-    };
-  }, [batchActionBarVisible, selectionCount]);
-
-  useEffect(() => {
-    selectionCountRef.current = selectionCount;
-    if (selectionCount > 0) {
-      setBatchActionBarVisible(true);
-    }
-  }, [selectionCount]);
-
-  useLayoutEffect(() => {
-    if (!batchActionBarVisible) return;
-    const currentCount = selectionCount;
-    const previousCount = previousSelectionCountRef.current;
-    const actionsEl = floatingBatchActionsRef.current;
-    if (!actionsEl) return;
-
-    batchActionAnimationRef.current?.stop();
-    batchActionAnimationRef.current = null;
-
-    if (currentCount > 0 && previousCount === 0) {
-      batchActionAnimationRef.current = animate(
-        actionsEl,
-        {
-          transform: [BATCH_BAR_HIDDEN_TRANSFORM, BATCH_BAR_BASE_TRANSFORM],
-          opacity: [0, 1],
-        },
-        {
-          duration: 0.28,
-          ease: easePower3Out,
-          onComplete: () => {
-            actionsEl.style.transform = BATCH_BAR_BASE_TRANSFORM;
-            actionsEl.style.opacity = '1';
-          },
-        }
-      );
-    } else if (currentCount === 0 && previousCount > 0) {
-      batchActionAnimationRef.current = animate(
-        actionsEl,
-        {
-          transform: [BATCH_BAR_BASE_TRANSFORM, BATCH_BAR_HIDDEN_TRANSFORM],
-          opacity: [1, 0],
-        },
-        {
-          duration: 0.22,
-          ease: easePower2In,
-          onComplete: () => {
-            if (selectionCountRef.current === 0) {
-              setBatchActionBarVisible(false);
-            }
-          },
-        }
-      );
-    }
-
-    previousSelectionCountRef.current = currentCount;
-  }, [batchActionBarVisible, selectionCount]);
-
-  useEffect(
-    () => () => {
-      batchActionAnimationRef.current?.stop();
-      batchActionAnimationRef.current = null;
+  const openFailureTraces = useCallback(
+    (file: AuthFileItem) => {
+      const authId = String(file.id ?? file.authIndex ?? file['auth_index'] ?? '').trim();
+      const credentialId = authId || file.name;
+      const params = new URLSearchParams({
+        view: 'traces',
+        status: 'failure',
+        credential: credentialId,
+      });
+      navigate(`/usage?${params.toString()}`);
     },
-    []
+    [navigate]
+  );
+
+  const failureReasons = useMemo(() => {
+    if (!failureReasonFile) return [];
+    const raw = failureReasonFile.failure_reasons ?? failureReasonFile.failureReasons;
+    if (!Array.isArray(raw)) return [];
+    return raw
+      .map((item) => ({
+        reason: String(item.reason ?? item.code ?? 'unknown_error').trim() || 'unknown_error',
+        status: Number(item.http_status ?? item.httpStatus ?? 0) || 0,
+        count: Number(item.count ?? 0) || 0,
+        message: String(item.last_message ?? item.lastMessage ?? '').trim(),
+        lastAt: String(item.last_at ?? item.lastAt ?? '').trim(),
+        retryable: item.retryable === true,
+      }))
+      .sort((a, b) => b.count - a.count);
+  }, [failureReasonFile]);
+
+  const batchActions = (
+    <div className={styles.batchActionContainer}>
+      <div className={styles.batchActionBar}>
+        <div className={styles.batchActionLeft}>
+          <span className={styles.batchSelectionText}>
+            {t('auth_files.batch_selected', { count: selectionCount })}
+          </span>
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => selectAllVisible(pageItems)}
+            disabled={selectablePageItems.length === 0}
+          >
+            {t('auth_files.batch_select_page')}
+          </Button>
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => selectAllVisible(sorted)}
+            disabled={selectableFilteredItems.length === 0}
+          >
+            {t('auth_files.batch_select_filtered')}
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => invertVisibleSelection(pageItems)}
+            disabled={selectablePageItems.length === 0}
+          >
+            {t('auth_files.batch_invert_page')}
+          </Button>
+          <Button variant="ghost" size="sm" onClick={deselectAll} disabled={selectionCount === 0}>
+            {t('auth_files.batch_deselect')}
+          </Button>
+        </div>
+        <div className={styles.batchActionRight}>
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => void refreshQuotaTargets(selectedQuotaTargets, 'selected')}
+            disabled={disableControls || bulkQuotaState.running || selectedQuotaTargets.length === 0}
+          >
+            {t('auth_files.batch_refresh_selected_quota', {
+              defaultValue: 'Refresh selected quota',
+            })}
+          </Button>
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => void refreshQuotaTargets(filteredQuotaTargets, 'filtered')}
+            disabled={disableControls || bulkQuotaState.running || filteredQuotaTargets.length === 0}
+          >
+            {t('auth_files.batch_refresh_filtered_quota', {
+              defaultValue: 'Refresh filtered quota',
+            })}
+          </Button>
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => void refreshQuotaTargets(allQuotaTargets, 'all')}
+            disabled={disableControls || bulkQuotaState.running || allQuotaTargets.length === 0}
+          >
+            {t('auth_files.batch_refresh_all_quota', {
+              defaultValue: 'Refresh all quota',
+            })}
+          </Button>
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => void batchDownload(selectedNames)}
+            disabled={disableControls || selectedNames.length === 0}
+          >
+            {t('auth_files.batch_download')}
+          </Button>
+          <Button
+            size="sm"
+            onClick={() => batchSetStatus(selectedNames, true)}
+            disabled={batchStatusButtonsDisabled}
+          >
+            {t('auth_files.batch_enable')}
+          </Button>
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => batchSetStatus(selectedNames, false)}
+            disabled={batchStatusButtonsDisabled}
+          >
+            {t('auth_files.batch_disable')}
+          </Button>
+          <Button
+            variant="danger"
+            size="sm"
+            onClick={() => batchDelete(selectedNames)}
+            disabled={disableControls || selectedNames.length === 0}
+          >
+            {t('common.delete')}
+          </Button>
+        </div>
+        {bulkQuotaState.running && (
+          <div className={styles.batchQuotaStatus}>
+            {t('auth_files.bulk_quota_progress', {
+              done: bulkQuotaState.done,
+              total: bulkQuotaState.total,
+              succeeded: bulkQuotaState.succeeded,
+              failed: bulkQuotaState.failed,
+              defaultValue:
+                'Quota refresh {{done}}/{{total}} · {{succeeded}} succeeded · {{failed}} failed',
+            })}
+          </div>
+        )}
+      </div>
+    </div>
   );
 
   const renderFilterTags = () => (
@@ -1061,6 +1110,8 @@ export function AuthFilesPage() {
               </div>
             </div>
 
+            {batchActions}
+
             {loading ? (
               <div className={styles.hint}>{t('common.loading')}</div>
             ) : pageItems.length === 0 ? (
@@ -1090,6 +1141,7 @@ export function AuthFilesPage() {
                     onOpenPrefixProxyEditor={openPrefixProxyEditor}
                     onOpenCooldownEditor={openCooldownEditor}
                     onCooldownClear={handleCooldownClear}
+                    onShowFailureReasons={openFailureReasons}
                     onDelete={handleDelete}
                     onToggleStatus={handleStatusToggle}
                     onToggleSelect={toggleSelect}
@@ -1179,6 +1231,68 @@ export function AuthFilesPage() {
       />
 
       <Modal
+        open={Boolean(failureReasonFile)}
+        title={t('auth_files.failure_reasons_title', {
+          defaultValue: 'Failure reasons',
+        })}
+        onClose={closeFailureReasons}
+        width={560}
+        footer={
+          <>
+            <Button variant="secondary" onClick={closeFailureReasons}>
+              {t('common.close', { defaultValue: 'Close' })}
+            </Button>
+            {failureReasonFile && (
+              <Button onClick={() => openFailureTraces(failureReasonFile)}>
+                {t('auth_files.failure_traces_button', {
+                  defaultValue: 'View failed traces',
+                })}
+              </Button>
+            )}
+          </>
+        }
+      >
+        {failureReasonFile && (
+          <div className={styles.failureReasonPanel}>
+            <div className={styles.cooldownTarget} title={failureReasonFile.name}>
+              {failureReasonFile.name}
+            </div>
+            {failureReasons.length === 0 ? (
+              <div className={styles.failureReasonEmpty}>
+                {t('auth_files.failure_reasons_empty', {
+                  defaultValue: 'No grouped failure reasons recorded for this credential yet.',
+                })}
+              </div>
+            ) : (
+              <div className={styles.failureReasonList}>
+                {failureReasons.map((reason) => (
+                  <div
+                    className={styles.failureReasonItem}
+                    key={`${reason.reason}-${reason.status}`}
+                  >
+                    <div className={styles.failureReasonMain}>
+                      <strong>{reason.reason}</strong>
+                      {reason.message && <span>{reason.message}</span>}
+                    </div>
+                    <div className={styles.failureReasonStats}>
+                      <span>{reason.count}</span>
+                      {reason.status > 0 && <small>HTTP {reason.status}</small>}
+                      {reason.retryable && (
+                        <small>
+                          {t('auth_files.failure_reason_retryable', {
+                            defaultValue: 'retryable',
+                          })}
+                        </small>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </Modal>
+      <Modal
         open={Boolean(cooldownEditor)}
         title={t('auth_files.cooldown_modal_title', { defaultValue: 'Set cooldown' })}
         onClose={closeCooldownEditor}
@@ -1243,135 +1357,6 @@ export function AuthFilesPage() {
           </div>
         )}
       </Modal>
-
-      {batchActionBarVisible && typeof document !== 'undefined'
-        ? createPortal(
-            <div className={styles.batchActionContainer} ref={floatingBatchActionsRef}>
-              <div className={styles.batchActionBar}>
-                <div className={styles.batchActionLeft}>
-                  <span className={styles.batchSelectionText}>
-                    {t('auth_files.batch_selected', { count: selectionCount })}
-                  </span>
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    onClick={() => selectAllVisible(pageItems)}
-                    disabled={selectablePageItems.length === 0}
-                  >
-                    {t('auth_files.batch_select_page')}
-                  </Button>
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    onClick={() => selectAllVisible(sorted)}
-                    disabled={selectableFilteredItems.length === 0}
-                  >
-                    {t('auth_files.batch_select_filtered')}
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => invertVisibleSelection(pageItems)}
-                    disabled={selectablePageItems.length === 0}
-                  >
-                    {t('auth_files.batch_invert_page')}
-                  </Button>
-                  <Button variant="ghost" size="sm" onClick={deselectAll}>
-                    {t('auth_files.batch_deselect')}
-                  </Button>
-                </div>
-                <div className={styles.batchActionRight}>
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    onClick={() => void refreshQuotaTargets(selectedQuotaTargets, 'selected')}
-                    disabled={
-                      disableControls ||
-                      bulkQuotaState.running ||
-                      selectedQuotaTargets.length === 0
-                    }
-                  >
-                    {t('auth_files.batch_refresh_selected_quota', {
-                      defaultValue: 'Refresh selected quota',
-                    })}
-                  </Button>
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    onClick={() => void refreshQuotaTargets(filteredQuotaTargets, 'filtered')}
-                    disabled={
-                      disableControls ||
-                      bulkQuotaState.running ||
-                      filteredQuotaTargets.length === 0
-                    }
-                  >
-                    {t('auth_files.batch_refresh_filtered_quota', {
-                      defaultValue: 'Refresh filtered quota',
-                    })}
-                  </Button>
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    onClick={() => void refreshQuotaTargets(allQuotaTargets, 'all')}
-                    disabled={
-                      disableControls ||
-                      bulkQuotaState.running ||
-                      allQuotaTargets.length === 0
-                    }
-                  >
-                    {t('auth_files.batch_refresh_all_quota', {
-                      defaultValue: 'Refresh all quota',
-                    })}
-                  </Button>
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    onClick={() => void batchDownload(selectedNames)}
-                    disabled={disableControls || selectedNames.length === 0}
-                  >
-                    {t('auth_files.batch_download')}
-                  </Button>
-                  <Button
-                    size="sm"
-                    onClick={() => batchSetStatus(selectedNames, true)}
-                    disabled={batchStatusButtonsDisabled}
-                  >
-                    {t('auth_files.batch_enable')}
-                  </Button>
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    onClick={() => batchSetStatus(selectedNames, false)}
-                    disabled={batchStatusButtonsDisabled}
-                  >
-                    {t('auth_files.batch_disable')}
-                  </Button>
-                  <Button
-                    variant="danger"
-                    size="sm"
-                    onClick={() => batchDelete(selectedNames)}
-                    disabled={disableControls || selectedNames.length === 0}
-                  >
-                    {t('common.delete')}
-                  </Button>
-                </div>
-                {bulkQuotaState.running && (
-                  <div className={styles.batchQuotaStatus}>
-                    {t('auth_files.bulk_quota_progress', {
-                      done: bulkQuotaState.done,
-                      total: bulkQuotaState.total,
-                      succeeded: bulkQuotaState.succeeded,
-                      failed: bulkQuotaState.failed,
-                      defaultValue:
-                        'Quota refresh {{done}}/{{total}} · {{succeeded}} succeeded · {{failed}} failed',
-                    })}
-                  </div>
-                )}
-              </div>
-            </div>,
-            document.body
-          )
-        : null}
     </div>
   );
 }

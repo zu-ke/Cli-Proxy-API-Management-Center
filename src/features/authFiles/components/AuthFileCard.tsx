@@ -5,6 +5,7 @@ import { SelectionCheckbox } from '@/components/ui/SelectionCheckbox';
 import { ToggleSwitch } from '@/components/ui/ToggleSwitch';
 import {
   IconCheck,
+  IconChartLine,
   IconDownload,
   IconInfo,
   IconModelCluster,
@@ -57,6 +58,7 @@ export type AuthFileCardProps = {
   onOpenPrefixProxyEditor: (file: AuthFileItem) => void;
   onOpenCooldownEditor: (file: AuthFileItem) => void;
   onCooldownClear: (file: AuthFileItem) => void;
+  onShowFailureReasons: (file: AuthFileItem) => void;
   onDelete: (name: string) => void;
   onToggleStatus: (file: AuthFileItem, enabled: boolean) => void;
   onToggleSelect: (name: string) => void;
@@ -86,6 +88,7 @@ export function AuthFileCard(props: AuthFileCardProps) {
     onOpenPrefixProxyEditor,
     onOpenCooldownEditor,
     onCooldownClear,
+    onShowFailureReasons,
     onDelete,
     onToggleStatus,
     onToggleSelect,
@@ -152,7 +155,7 @@ export function AuthFileCard(props: AuthFileCardProps) {
       ? quotaFilterType
       : resolveQuotaType(file);
 
-  const showQuotaLayout = Boolean(quotaType) && !isRuntimeOnly && !compact;
+  const showQuotaLayout = Boolean(quotaType) && !isRuntimeOnly;
 
   const providerCardClass =
     quotaType === 'antigravity'
@@ -169,6 +172,12 @@ export function AuthFileCard(props: AuthFileCardProps) {
 
   const rawAuthIndex = file['auth_index'] ?? file.authIndex;
   const authIndexKey = normalizeRecentRequestAuthIndex(rawAuthIndex);
+  const rawCredentialId = typeof file.id === 'string' ? file.id.trim() : '';
+  const authIdText = rawCredentialId || authIndexKey || String(rawAuthIndex ?? '').trim() || '-';
+  const authIdTitle =
+    rawCredentialId && authIndexKey && rawCredentialId !== authIndexKey
+      ? `${rawCredentialId} / ${authIndexKey}`
+      : authIdText;
   const statusData =
     (authIndexKey && statusBarCache.get(authIndexKey)) ||
     statusBarDataFromRecentRequests(recentBuckets);
@@ -261,6 +270,14 @@ export function AuthFileCard(props: AuthFileCardProps) {
 
           <div className={`${styles.cardMeta} ${compact ? styles.cardMetaCompact : ''}`}>
             <div className={styles.metaItem}>
+              <span className={styles.metaLabel}>
+                {t('auth_files.auth_id_label', { defaultValue: 'Credential ID' })}
+              </span>
+              <span className={styles.metaValue} title={authIdTitle}>
+                {authIdText}
+              </span>
+            </div>
+            <div className={styles.metaItem}>
               <span className={styles.metaLabel}>{t('auth_files.file_size')}</span>
               <span className={styles.metaValue}>
                 {file.size ? formatFileSize(file.size) : '-'}
@@ -352,6 +369,18 @@ export function AuthFileCard(props: AuthFileCardProps) {
               )}
               {!isRuntimeOnly && (
                 <div className={styles.cardUtilityActions}>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => onShowFailureReasons(file)}
+                    className={styles.iconButton}
+                    title={t('auth_files.failure_reasons_button', {
+                      defaultValue: 'Failure reasons',
+                    })}
+                    disabled={disableControls}
+                  >
+                    <IconChartLine className={styles.actionIcon} size={16} />
+                  </Button>
                   <Button
                     variant="secondary"
                     size="sm"

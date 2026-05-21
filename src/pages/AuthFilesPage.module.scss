@@ -807,10 +807,6 @@
     font-size: 11px;
   }
 
-  .quotaSection {
-    display: none;
-  }
-
   .cardActions {
     gap: 6px;
     padding-top: 6px;
@@ -1591,6 +1587,81 @@
   gap: 8px;
 }
 
+.failureReasonPanel {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.failureReasonEmpty {
+  padding: 14px;
+  border: 1px dashed color-mix(in srgb, var(--border-color) 70%, transparent);
+  border-radius: 8px;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.failureReasonList {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.failureReasonItem {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--border-color) 70%, transparent);
+  border-radius: 8px;
+  background: var(--bg-secondary);
+}
+
+.failureReasonMain {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+
+  strong {
+    color: var(--text-primary);
+    font-size: 13px;
+  }
+
+  span {
+    overflow: hidden;
+    color: var(--text-secondary);
+    font-size: 12px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
+.failureReasonStats {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+
+  span {
+    color: var(--danger-color);
+    font-size: 18px;
+    font-weight: 800;
+    font-variant-numeric: tabular-nums;
+  }
+
+  small {
+    padding: 2px 6px;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--danger-color) 10%, transparent);
+    color: var(--text-tertiary);
+    font-size: 11px;
+    font-weight: 700;
+  }
+}
+
 @include mobile {
   .cardActions {
     flex-wrap: wrap;
@@ -1625,15 +1696,11 @@
 }
 
 .batchActionContainer {
-  position: fixed;
-  left: var(--content-center-x, 50%);
-  bottom: calc(16px + env(safe-area-inset-bottom));
-  transform: translateX(-50%);
-  z-index: 50;
+  position: static;
   width: min(960px, calc(100vw - 24px));
   max-width: calc(100vw - 24px);
+  margin: 0 auto $spacing-md;
   box-sizing: border-box;
-  will-change: transform, opacity;
 }
 
 .batchActionBar {
@@ -1683,9 +1750,8 @@
 
 @include mobile {
   .batchActionContainer {
-    width: calc(100vw - 16px);
-    max-width: calc(100vw - 16px);
-    bottom: calc(12px + env(safe-area-inset-bottom));
+    width: 100%;
+    max-width: 100%;
   }
 
   .batchActionBar {

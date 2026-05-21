@@ -1,9 +1,11 @@
 import { useCallback, useDeferredValue, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { useSearchParams } from 'react-router-dom';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Input } from '@/components/ui/Input';
+import { Modal } from '@/components/ui/Modal';
 import { Select, type SelectOption } from '@/components/ui/Select';
 import {
   IconChartLine,
@@ -12,9 +14,10 @@ import {
   IconSlidersHorizontal,
 } from '@/components/ui/icons';
 import { useHeaderRefresh } from '@/hooks/useHeaderRefresh';
-import { apiKeyUsageApi, authFilesApi } from '@/services/api';
+import { useInterval } from '@/hooks/useInterval';
+import { apiKeyUsageApi, authFilesApi, requestTracesApi } from '@/services/api';
 import { useAuthStore } from '@/stores';
-import type { AuthFileItem } from '@/types';
+import type { AuthFileItem, RequestTraceDetail, RequestTraceStatus, RequestTraceSummary } from '@/types';
 import {
   normalizeRecentRequestUsageEntry,
   normalizeUsageTotal,
@@ -27,6 +30,7 @@ import styles from './UsagePage.module.scss';
 
 type UsageStatus = 'success' | 'failure' | 'mixed' | 'idle';
 type SortKey = 'total' | 'failed' | 'successRate' | 'provider';
+type UsageView = 'summary' | 'traces';
 
 interface UsageRow {
   id: string;
@@ -161,18 +165,61 @@ const formatNumber = (value: number): string => new Intl.NumberFormat().format(v
 
 const formatPercent = (value: number): string => `${value.toFixed(1)}%`;
 
+const formatDuration = (value: number | null): string => {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return '-';
+  if (value < 1000) return `${Math.round(value)}ms`;
+  return `${(value / 1000).toFixed(2)}s`;
+};
+
+const formatTraceTime = (value?: string): string => {
+  if (!value) return '-';
+  const timestamp = Date.parse(value);
+  if (Number.isNaN(timestamp)) return value;
+  return new Intl.DateTimeFormat(undefined, {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  }).format(new Date(timestamp));
+};
+
+const toJsonPreview = (value: unknown): string => {
+  if (value === undefined || value === null || value === '') return '-';
+  if (typeof value === 'string') return value;
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
+};
+
 export function UsagePage() {
   const { t } = useTranslation();
+  const [searchParams, setSearchParams] = useSearchParams();
   const connectionStatus = useAuthStore((state) => state.connectionStatus);
+  const [view, setView] = useState<UsageView>(
+    searchParams.get('view') === 'traces' ? 'traces' : 'summary'
+  );
   const [rows, setRows] = useState<UsageRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [providerFilter, setProviderFilter] = useState(ALL_VALUE);
   const [statusFilter, setStatusFilter] = useState<UsageStatus | typeof ALL_VALUE>(ALL_VALUE);
-  const [searchQuery, setSearchQuery] = useState('');
+  const [searchQuery, setSearchQuery] = useState(searchParams.get('credential') ?? '');
   const deferredSearchQuery = useDeferredValue(searchQuery);
   const [onlyFailed, setOnlyFailed] = useState(false);
   const [sortKey, setSortKey] = useState<SortKey>('total');
+  const [traces, setTraces] = useState<RequestTraceSummary[]>([]);
+  const [tracesLoading, setTracesLoading] = useState(false);
+  const [tracesError, setTracesError] = useState('');
+  const [traceStatusFilter, setTraceStatusFilter] = useState<RequestTraceStatus | typeof ALL_VALUE>(
+    searchParams.get('status') === 'failure' ? 'failure' : ALL_VALUE
+  );
+  const [traceProviderFilter, setTraceProviderFilter] = useState(ALL_VALUE);
+  const [traceAutoRefresh, setTraceAutoRefresh] = useState(true);
+  const [selectedTrace, setSelectedTrace] = useState<RequestTraceDetail | null>(null);
+  const [traceDetailLoading, setTraceDetailLoading] = useState(false);
 
   const disableControls = connectionStatus !== 'connected';
 
@@ -202,11 +249,74 @@ export function UsagePage() {
     }
   }, [disableControls, t]);
 
-  useHeaderRefresh(loadUsage);
+  const loadTraces = useCallback(async () => {
+    if (disableControls) {
+      setTracesLoading(false);
+      return;
+    }
+
+    setTracesLoading(true);
+    setTracesError('');
+    try {
+      const payload = await requestTracesApi.list({
+        limit: 100,
+        search: searchQuery.trim() || undefined,
+        status: traceStatusFilter === ALL_VALUE ? undefined : traceStatusFilter,
+        provider: traceProviderFilter === ALL_VALUE ? undefined : traceProviderFilter,
+        credentialId: searchParams.get('credential') ?? undefined,
+        authId: searchParams.get('credential') ?? undefined,
+      });
+      setTraces(payload.traces);
+    } catch (err: unknown) {
+      setTracesError(
+        getErrorMessage(err, t('notification.refresh_failed', { defaultValue: 'Refresh failed' }))
+      );
+    } finally {
+      setTracesLoading(false);
+    }
+  }, [
+    disableControls,
+    searchParams,
+    searchQuery,
+    t,
+    traceProviderFilter,
+    traceStatusFilter,
+  ]);
+
+  useHeaderRefresh(view === 'traces' ? loadTraces : loadUsage);
 
   useEffect(() => {
+    if (view === 'traces') {
+      void loadTraces();
+      return;
+    }
     void loadUsage();
-  }, [loadUsage]);
+  }, [loadTraces, loadUsage, view]);
+
+  useInterval(
+    () => {
+      void loadTraces();
+    },
+    view === 'traces' && traceAutoRefresh && !disableControls ? 10_000 : null
+  );
+
+  const handleViewChange = useCallback(
+    (nextView: UsageView) => {
+      setView(nextView);
+      setSearchParams((current) => {
+        const next = new URLSearchParams(current);
+        if (nextView === 'traces') {
+          next.set('view', 'traces');
+        } else {
+          next.delete('view');
+          next.delete('status');
+          next.delete('credential');
+        }
+        return next;
+      });
+    },
+    [setSearchParams]
+  );
 
   const providerOptions = useMemo<SelectOption[]>(() => {
     const providers = Array.from(new Set(rows.map((row) => row.provider))).sort((a, b) =>
@@ -276,6 +386,78 @@ export function UsagePage() {
     });
   }, [deferredSearchQuery, onlyFailed, providerFilter, rows, sortKey, statusFilter]);
 
+  const traceProviderOptions = useMemo<SelectOption[]>(() => {
+    const providers = Array.from(new Set(traces.map((trace) => trace.provider))).sort((a, b) =>
+      a.localeCompare(b)
+    );
+    return [
+      {
+        value: ALL_VALUE,
+        label: t('usage.filters.all_providers', { defaultValue: 'All providers' }),
+      },
+      ...providers.map((provider) => ({ value: provider, label: provider })),
+    ];
+  }, [t, traces]);
+
+  const traceStatusOptions = useMemo<SelectOption[]>(
+    () => [
+      {
+        value: ALL_VALUE,
+        label: t('usage.filters.all_statuses', { defaultValue: 'All statuses' }),
+      },
+      { value: 'success', label: t('usage.status.success', { defaultValue: 'Success' }) },
+      { value: 'failure', label: t('usage.status.failure', { defaultValue: 'Failure' }) },
+      { value: 'retrying', label: t('usage.status.retrying', { defaultValue: 'Retrying' }) },
+      { value: 'pending', label: t('usage.status.pending', { defaultValue: 'Pending' }) },
+      { value: 'unknown', label: t('usage.status.unknown', { defaultValue: 'Unknown' }) },
+    ],
+    [t]
+  );
+
+  const filteredTraces = useMemo(() => {
+    const query = deferredSearchQuery.trim().toLowerCase();
+    return traces.filter((trace) => {
+      if (traceStatusFilter !== ALL_VALUE && trace.status !== traceStatusFilter) return false;
+      if (traceProviderFilter !== ALL_VALUE && trace.provider !== traceProviderFilter) return false;
+      if (!query) return true;
+      return [
+        trace.requestId,
+        trace.credentialId,
+        trace.authId,
+        trace.provider,
+        trace.requestSummary,
+        trace.responseSummary,
+        trace.failureReason,
+        ...trace.retryCredentialOrder,
+      ]
+        .join(' ')
+        .toLowerCase()
+        .includes(query);
+    });
+  }, [deferredSearchQuery, traceProviderFilter, traceStatusFilter, traces]);
+
+  const openTraceDetail = useCallback(
+    async (trace: RequestTraceSummary) => {
+      setTraceDetailLoading(true);
+      setSelectedTrace({ ...trace, raw: trace });
+      try {
+        setSelectedTrace(await requestTracesApi.get(trace.id));
+      } catch (err: unknown) {
+        setSelectedTrace({
+          ...trace,
+          responseSummary: getErrorMessage(
+            err,
+            t('usage.trace_detail_failed', { defaultValue: 'Failed to load trace detail' })
+          ),
+          raw: trace,
+        });
+      } finally {
+        setTraceDetailLoading(false);
+      }
+    },
+    [t]
+  );
+
   const summary = useMemo(
     () =>
       rows.reduce(
@@ -324,6 +506,23 @@ export function UsagePage() {
 
       {error && <div className={styles.errorBox}>{error}</div>}
 
+      <div className={styles.viewTabs}>
+        <Button
+          variant={view === 'summary' ? 'primary' : 'secondary'}
+          size="sm"
+          onClick={() => handleViewChange('summary')}
+        >
+          {t('usage.views.summary', { defaultValue: 'Usage summary' })}
+        </Button>
+        <Button
+          variant={view === 'traces' ? 'primary' : 'secondary'}
+          size="sm"
+          onClick={() => handleViewChange('traces')}
+        >
+          {t('usage.views.traces', { defaultValue: 'Request traces' })}
+        </Button>
+      </div>
+
       <div className={styles.summaryGrid}>
         <div className={styles.summaryItem}>
           <span>{t('usage.summary.keys', { defaultValue: 'Keys' })}</span>
@@ -344,6 +543,8 @@ export function UsagePage() {
       </div>
 
       <Card className={styles.usageCard}>
+        {view === 'summary' ? (
+          <>
         <div className={styles.filters}>
           <div className={styles.searchWrap}>
             <Input
@@ -548,7 +749,192 @@ export function UsagePage() {
             ))}
           </div>
         )}
+          </>
+        ) : (
+          <>
+            {tracesError && <div className={styles.errorBox}>{tracesError}</div>}
+            <div className={styles.filters}>
+              <div className={styles.searchWrap}>
+                <Input
+                  value={searchQuery}
+                  onChange={(event) => setSearchQuery(event.target.value)}
+                  placeholder={t('usage.trace_search_placeholder', {
+                    defaultValue: 'Search request, credential, reason, or summary',
+                  })}
+                  className={styles.searchInput}
+                  rightElement={<IconSearch size={16} className={styles.searchIcon} />}
+                />
+              </div>
+              <div className={styles.selectWrap}>
+                <span className={styles.filterLabel}>
+                  {t('usage.filters.provider', { defaultValue: 'Provider' })}
+                </span>
+                <Select
+                  value={traceProviderFilter}
+                  options={traceProviderOptions}
+                  onChange={setTraceProviderFilter}
+                  ariaLabel={t('usage.filters.provider', { defaultValue: 'Provider' })}
+                />
+              </div>
+              <div className={styles.selectWrap}>
+                <span className={styles.filterLabel}>
+                  {t('usage.filters.status', { defaultValue: 'Status' })}
+                </span>
+                <Select
+                  value={traceStatusFilter}
+                  options={traceStatusOptions}
+                  onChange={(value) =>
+                    setTraceStatusFilter(value as RequestTraceStatus | typeof ALL_VALUE)
+                  }
+                  ariaLabel={t('usage.filters.status', { defaultValue: 'Status' })}
+                />
+              </div>
+              <label className={styles.failedOnly}>
+                <input
+                  type="checkbox"
+                  checked={traceAutoRefresh}
+                  onChange={(event) => setTraceAutoRefresh(event.target.checked)}
+                />
+                <span>{t('usage.trace_auto_refresh', { defaultValue: 'Poll refresh' })}</span>
+              </label>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => void loadTraces()}
+                loading={tracesLoading}
+                disabled={disableControls}
+              >
+                <span className={styles.buttonContent}>
+                  <IconRefreshCw size={15} />
+                  {t('common.refresh', { defaultValue: 'Refresh' })}
+                </span>
+              </Button>
+            </div>
+
+            <div className={styles.tableHeader}>
+              <span className={styles.tableTitle}>
+                <IconSlidersHorizontal size={16} />
+                {t('usage.trace_results', {
+                  count: filteredTraces.length,
+                  total: traces.length,
+                  defaultValue: '{{count}} / {{total}} traces',
+                })}
+              </span>
+            </div>
+
+            {tracesLoading && traces.length === 0 ? (
+              <div className={styles.loadingState}>
+                {t('common.loading', { defaultValue: 'Loading...' })}
+              </div>
+            ) : filteredTraces.length === 0 ? (
+              <EmptyState
+                title={t('usage.trace_empty_title', { defaultValue: 'No request traces' })}
+                description={t('usage.trace_empty_desc', {
+                  defaultValue: 'Request trace records will appear after traffic is captured.',
+                })}
+              />
+            ) : (
+              <div
+                className={`${styles.table} ${styles.traceTable}`}
+                role="table"
+                aria-label={t('usage.views.traces', { defaultValue: 'Request traces' })}
+              >
+                <div className={`${styles.headRow} ${styles.traceHeadRow}`} role="row">
+                  <span role="columnheader">request_id</span>
+                  <span role="columnheader">
+                    {t('usage.columns.credential', { defaultValue: 'Credential' })}
+                  </span>
+                  <span role="columnheader">
+                    {t('usage.trace_retry_order', { defaultValue: 'Retry order' })}
+                  </span>
+                  <span role="columnheader">
+                    {t('usage.filters.status', { defaultValue: 'Status' })}
+                  </span>
+                  <span role="columnheader">
+                    {t('usage.trace_duration', { defaultValue: 'Duration' })}
+                  </span>
+                  <span role="columnheader">
+                    {t('usage.trace_request_summary', { defaultValue: 'Request' })}
+                  </span>
+                  <span role="columnheader">
+                    {t('usage.trace_response_summary', { defaultValue: 'Response' })}
+                  </span>
+                  <span role="columnheader" />
+                </div>
+                {filteredTraces.map((trace) => (
+                  <div className={`${styles.dataRow} ${styles.traceDataRow}`} role="row" key={trace.id}>
+                    <div className={styles.keyCell} role="cell" title={trace.requestId}>
+                      {trace.requestId || '-'}
+                    </div>
+                    <div className={styles.keyCell} role="cell" title={trace.credentialId || trace.authId}>
+                      {trace.credentialId || trace.authId || '-'}
+                    </div>
+                    <div className={styles.urlCell} role="cell" title={trace.retryCredentialOrder.join(' -> ')}>
+                      {trace.retryCredentialOrder.length
+                        ? trace.retryCredentialOrder.join(' -> ')
+                        : '-'}
+                    </div>
+                    <div className={styles.providerCell} role="cell">
+                      <span className={[styles.statusDot, styles[trace.status]].join(' ')} />
+                      <span className={[styles.statusBadge, styles[trace.status]].join(' ')}>
+                        {t(`usage.status.${trace.status}`, { defaultValue: trace.status })}
+                      </span>
+                    </div>
+                    <div className={styles.numberCell} role="cell">
+                      {formatDuration(trace.durationMs)}
+                    </div>
+                    <div className={styles.urlCell} role="cell" title={trace.requestSummary}>
+                      {trace.requestSummary || '-'}
+                    </div>
+                    <div
+                      className={styles.urlCell}
+                      role="cell"
+                      title={trace.failureReason || trace.responseSummary}
+                    >
+                      {trace.failureReason || trace.responseSummary || '-'}
+                    </div>
+                    <div className={styles.providerCell} role="cell">
+                      <Button variant="secondary" size="sm" onClick={() => void openTraceDetail(trace)}>
+                        {t('common.view', { defaultValue: 'View' })}
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </>
+        )}
       </Card>
+
+      <Modal
+        open={Boolean(selectedTrace)}
+        title={selectedTrace?.requestId || t('usage.trace_detail_title', { defaultValue: 'Trace detail' })}
+        onClose={() => setSelectedTrace(null)}
+        width={820}
+      >
+        {selectedTrace && (
+          <div className={styles.traceDetail}>
+            {traceDetailLoading && (
+              <div className={styles.loadingState}>
+                {t('common.loading', { defaultValue: 'Loading...' })}
+              </div>
+            )}
+            <div className={styles.traceDetailGrid}>
+              <span>request_id</span>
+              <strong>{selectedTrace.requestId || '-'}</strong>
+              <span>{t('usage.columns.credential', { defaultValue: 'Credential' })}</span>
+              <strong>{selectedTrace.credentialId || selectedTrace.authId || '-'}</strong>
+              <span>{t('usage.filters.status', { defaultValue: 'Status' })}</span>
+              <strong>{selectedTrace.status}</strong>
+              <span>{t('usage.trace_duration', { defaultValue: 'Duration' })}</span>
+              <strong>{formatDuration(selectedTrace.durationMs)}</strong>
+              <span>{t('usage.trace_time', { defaultValue: 'Time' })}</span>
+              <strong>{formatTraceTime(selectedTrace.createdAt)}</strong>
+            </div>
+            <pre>{toJsonPreview(selectedTrace.raw ?? selectedTrace)}</pre>
+          </div>
+        )}
+      </Modal>
     </div>
   );
 }

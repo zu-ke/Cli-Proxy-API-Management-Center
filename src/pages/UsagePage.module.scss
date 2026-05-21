@@ -61,6 +61,17 @@
   font-size: 14px;
 }
 
+.viewTabs {
+  display: inline-flex;
+  align-items: center;
+  gap: $spacing-xs;
+  align-self: flex-start;
+  padding: 4px;
+  border: 1px solid var(--border-color);
+  border-radius: $radius-md;
+  background: var(--bg-primary);
+}
+
 .summaryGrid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -223,6 +234,14 @@
   min-width: 980px;
 }
 
+.traceHeadRow,
+.traceDataRow {
+  grid-template-columns:
+    minmax(150px, 1fr) minmax(120px, 0.75fr) minmax(160px, 1fr) minmax(104px, 0.65fr)
+    minmax(84px, 0.5fr) minmax(180px, 1.3fr) minmax(180px, 1.3fr) minmax(76px, 0.45fr);
+  min-width: 1180px;
+}
+
 .headRow {
   position: sticky;
   top: 0;
@@ -381,6 +400,15 @@
   background: var(--border-color);
 }
 
+.retrying {
+  background: var(--warning-text);
+}
+
+.pending,
+.unknown {
+  background: var(--text-tertiary);
+}
+
 .statusBadge.success {
   border-color: var(--success-badge-border);
   background: var(--success-badge-bg);
@@ -403,10 +431,63 @@
   color: var(--text-tertiary);
 }
 
+.statusBadge.retrying {
+  border-color: var(--warning-border);
+  background: var(--warning-bg);
+  color: var(--warning-text);
+}
+
+.statusBadge.pending,
+.statusBadge.unknown {
+  color: var(--text-tertiary);
+}
+
 .loadingState {
   padding: $spacing-xl;
   color: var(--text-secondary);
   text-align: center;
+}
+
+.traceDetail {
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-md;
+
+  pre {
+    max-height: 420px;
+    overflow: auto;
+    margin: 0;
+    padding: $spacing-md;
+    border: 1px solid var(--border-color);
+    border-radius: $radius-md;
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    font-size: 12px;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+}
+
+.traceDetailGrid {
+  display: grid;
+  grid-template-columns: minmax(120px, 0.35fr) minmax(0, 1fr);
+  gap: 8px 12px;
+  padding: $spacing-md;
+  border: 1px solid var(--border-color);
+  border-radius: $radius-md;
+  background: var(--bg-secondary);
+
+  span {
+    color: var(--text-tertiary);
+    font-size: 12px;
+  }
+
+  strong {
+    min-width: 0;
+    overflow-wrap: anywhere;
+    color: var(--text-primary);
+    font-size: 13px;
+  }
 }
 
 @include mobile {
@@ -434,6 +515,10 @@
     border: 1px solid var(--border-color);
     border-radius: $radius-md;
     background: var(--bg-secondary);
+  }
+
+  .traceDataRow {
+    grid-template-columns: 1fr;
   }
 
   .providerCell,

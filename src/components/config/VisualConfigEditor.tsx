@@ -49,6 +49,8 @@ type VisualSection = {
   errorCount: number;
 };
 
+const SHOW_ADVANCED_VISUAL_CONFIG = false;
+
 interface VisualConfigEditorProps {
   values: VisualConfigValues;
   validationErrors?: VisualConfigValidationErrors;
@@ -263,56 +265,64 @@ export function VisualConfigEditor({
   );
 
   const sections = useMemo<VisualSection[]>(
-    () => [
-      {
-        id: 'server',
-        title: t('config_management.visual.sections.server.title'),
-        icon: IconSettings,
-        errorCount: countErrors(['port']),
-      },
-      {
-        id: 'auth',
-        title: t('config_management.visual.sections.auth.title'),
-        icon: IconKey,
-        errorCount: 0,
-      },
-      {
-        id: 'system',
-        title: t('config_management.visual.sections.system.title'),
-        icon: IconDiamond,
-        errorCount: countErrors([
-          'errorLogsMaxFiles',
-          'logsMaxTotalSizeMb',
-          'redisUsageQueueRetentionSeconds',
-          'requestRetry',
-          'maxRetryCredentials',
-          'maxRetryInterval',
-          'authAutoRefreshWorkers',
-        ]),
-      },
-      {
-        id: 'quota',
-        title: t('config_management.visual.sections.quota.title'),
-        icon: IconTimer,
-        errorCount: 0,
-      },
-      {
-        id: 'streaming',
-        title: t('config_management.visual.sections.streaming.title'),
-        icon: IconSatellite,
-        errorCount: countErrors([
-          'streaming.keepaliveSeconds',
-          'streaming.bootstrapRetries',
-          'streaming.nonstreamKeepaliveInterval',
-        ]),
-      },
-      {
-        id: 'payload',
-        title: t('config_management.visual.sections.payload.title'),
-        icon: IconCode,
-        errorCount: hasPayloadValidationErrors ? 1 : 0,
-      },
-    ],
+    () => {
+      const allSections: VisualSection[] = [
+        {
+          id: 'server',
+          title: t('config_management.visual.sections.server.title'),
+          icon: IconSettings,
+          errorCount: countErrors(['port']),
+        },
+        {
+          id: 'auth',
+          title: t('config_management.visual.sections.auth.title'),
+          icon: IconKey,
+          errorCount: 0,
+        },
+        {
+          id: 'system',
+          title: t('config_management.visual.sections.system.title'),
+          icon: IconDiamond,
+          errorCount: countErrors([
+            'errorLogsMaxFiles',
+            'logsMaxTotalSizeMb',
+            'redisUsageQueueRetentionSeconds',
+            'requestRetry',
+            'maxRetryCredentials',
+            'maxRetryInterval',
+            'authAutoRefreshWorkers',
+          ]),
+        },
+        {
+          id: 'quota',
+          title: t('config_management.visual.sections.quota.title'),
+          icon: IconTimer,
+          errorCount: 0,
+        },
+        {
+          id: 'streaming',
+          title: t('config_management.visual.sections.streaming.title'),
+          icon: IconSatellite,
+          errorCount: countErrors([
+            'streaming.keepaliveSeconds',
+            'streaming.bootstrapRetries',
+            'streaming.nonstreamKeepaliveInterval',
+          ]),
+        },
+        {
+          id: 'payload',
+          title: t('config_management.visual.sections.payload.title'),
+          icon: IconCode,
+          errorCount: hasPayloadValidationErrors ? 1 : 0,
+        },
+      ];
+
+      return allSections.filter((section) =>
+        SHOW_ADVANCED_VISUAL_CONFIG
+          ? true
+          : section.id !== 'quota' && section.id !== 'streaming' && section.id !== 'payload'
+      );
+    },
     [countErrors, hasPayloadValidationErrors, t]
   );
 
@@ -724,10 +734,11 @@ export function VisualConfigEditor({
                 />
               </SectionGrid>
 
-              <SectionSubsection
-                title={t('config_management.visual.sections.headers.title')}
-                description={t('config_management.visual.sections.headers.description')}
-              >
+              {SHOW_ADVANCED_VISUAL_CONFIG ? (
+                <SectionSubsection
+                  title={t('config_management.visual.sections.headers.title')}
+                  description={t('config_management.visual.sections.headers.description')}
+                >
                 <SectionStack>
                   <div className={styles.subsectionHeader}>
                     <h3 className={styles.subsectionTitle}>
@@ -814,7 +825,8 @@ export function VisualConfigEditor({
                     />
                   </SectionGrid>
                 </SectionStack>
-              </SectionSubsection>
+                </SectionSubsection>
+              ) : null}
 
               <SectionSubsection
                 title={t('config_management.visual.sections.network.title')}
@@ -998,8 +1010,10 @@ export function VisualConfigEditor({
             </SectionStack>
           </ConfigSection>
 
-          <ConfigSection
-            id="quota"
+          {SHOW_ADVANCED_VISUAL_CONFIG ? (
+            <>
+              <ConfigSection
+                id="quota"
             ref={(node) => {
               sectionRefs.current.quota = node;
             }}
@@ -1203,7 +1217,9 @@ export function VisualConfigEditor({
                 />
               </SectionSubsection>
             </SectionStack>
-          </ConfigSection>
+              </ConfigSection>
+            </>
+          ) : null}
         </div>
       </div>
     </div>

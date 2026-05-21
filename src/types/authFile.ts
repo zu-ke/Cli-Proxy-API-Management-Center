@@ -21,6 +21,7 @@ export type AuthFileType =
   | 'unknown';
 
 export interface AuthFileItem {
+  id?: string;
   name: string;
   type?: AuthFileType | string;
   provider?: string;
@@ -64,9 +65,24 @@ export interface AuthFileItem {
   modified?: number;
   success?: unknown;
   failed?: unknown;
+  failure_reasons?: AuthFileFailureReason[];
+  failureReasons?: AuthFileFailureReason[];
   recent_requests?: RecentRequestBucket[];
   recentRequests?: RecentRequestBucket[];
   [key: string]: unknown;
+}
+
+export interface AuthFileFailureReason {
+  reason?: string;
+  code?: string;
+  http_status?: number;
+  httpStatus?: number;
+  count?: number;
+  last_message?: string;
+  lastMessage?: string;
+  last_at?: string;
+  lastAt?: string;
+  retryable?: boolean;
 }
 
 export interface AuthFilesResponse {
