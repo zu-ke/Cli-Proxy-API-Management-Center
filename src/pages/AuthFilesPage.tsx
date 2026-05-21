@@ -23,7 +23,17 @@ import { Select } from '@/components/ui/Select';
 import { IconFilterAll, IconSearch } from '@/components/ui/icons';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { ToggleSwitch } from '@/components/ui/ToggleSwitch';
+import {
+  ANTIGRAVITY_CONFIG,
+  CLAUDE_CONFIG,
+  CODEX_CONFIG,
+  GEMINI_CLI_CONFIG,
+  KIMI_CONFIG,
+} from '@/components/quota';
 import { copyToClipboard } from '@/utils/clipboard';
+import { getStatusFromError } from '@/utils/quota';
+import type { AuthFileItem } from '@/types';
+import type { TFunction } from 'i18next';
 import {
   MAX_CARD_PAGE_SIZE,
   MIN_CARD_PAGE_SIZE,
@@ -57,7 +67,7 @@ import {
   writePersistedAuthFilesCompactMode,
   type AuthFilesSortMode,
 } from '@/features/authFiles/uiState';
-import { useAuthStore, useNotificationStore, useThemeStore } from '@/stores';
+import { useAuthStore, useNotificationStore, useQuotaStore, useThemeStore } from '@/stores';
 import styles from './AuthFilesPage.module.scss';
 
 const easePower3Out = (progress: number) => 1 - (1 - progress) ** 4;
@@ -66,6 +76,7 @@ const BATCH_BAR_BASE_TRANSFORM = 'translateX(-50%)';
 const BATCH_BAR_HIDDEN_TRANSFORM = 'translateX(-50%) translateY(56px)';
 const DEFAULT_REGULAR_PAGE_SIZE = 9;
 const DEFAULT_COMPACT_PAGE_SIZE = 12;
+const BULK_QUOTA_CONCURRENCY = 6;
 
 const escapeWildcardSearchSegment = (value: string) =>
   value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -74,6 +85,37 @@ const buildWildcardSearch = (value: string): RegExp | null => {
   if (!value.includes('*')) return null;
   const pattern = value.split('*').map(escapeWildcardSearchSegment).join('.*');
   return new RegExp(pattern, 'i');
+};
+
+const getQuotaConfig = (type: QuotaProviderType) => {
+  if (type === 'antigravity') return ANTIGRAVITY_CONFIG;
+  if (type === 'claude') return CLAUDE_CONFIG;
+  if (type === 'codex') return CODEX_CONFIG;
+  if (type === 'kimi') return KIMI_CONFIG;
+  return GEMINI_CLI_CONFIG;
+};
+
+const resolveQuotaProviderType = (file: AuthFileItem): QuotaProviderType | null => {
+  const type = normalizeProviderKey(String(file.type ?? file.provider ?? ''));
+  return QUOTA_PROVIDER_TYPES.has(type as QuotaProviderType)
+    ? (type as QuotaProviderType)
+    : null;
+};
+
+const runWithConcurrency = async <T,>(
+  items: T[],
+  limit: number,
+  worker: (item: T, index: number) => Promise<void>
+) => {
+  let cursor = 0;
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (cursor < items.length) {
+      const index = cursor;
+      cursor += 1;
+      await worker(items[index], index);
+    }
+  });
+  await Promise.all(workers);
 };
 
 export function AuthFilesPage() {
@@ -99,6 +141,21 @@ export function AuthFilesPage() {
   const [viewMode, setViewMode] = useState<'diagram' | 'list'>('list');
   const [sortMode, setSortMode] = useState<AuthFilesSortMode>('default');
   const [batchActionBarVisible, setBatchActionBarVisible] = useState(false);
+  const [bulkQuotaState, setBulkQuotaState] = useState<{
+    running: boolean;
+    scope: 'selected' | 'filtered' | 'all' | null;
+    total: number;
+    done: number;
+    succeeded: number;
+    failed: number;
+  }>({
+    running: false,
+    scope: null,
+    total: 0,
+    done: 0,
+    succeeded: 0,
+    failed: 0,
+  });
   const [uiStateHydrated, setUiStateHydrated] = useState(false);
   const floatingBatchActionsRef = useRef<HTMLDivElement>(null);
   const batchActionAnimationRef = useRef<AnimationPlaybackControlsWithThen | null>(null);
@@ -450,6 +507,44 @@ export function AuthFilesPage() {
     batchStatusUpdating ||
     selectedHasStatusUpdating;
 
+  const fileByName = useMemo(() => {
+    const map = new Map<string, AuthFileItem>();
+    files.forEach((file) => {
+      map.set(file.name, file);
+    });
+    return map;
+  }, [files]);
+
+  const selectedQuotaTargets = useMemo(
+    () =>
+      selectedNames
+        .map((name) => fileByName.get(name))
+        .filter((file): file is AuthFileItem => Boolean(file))
+        .filter((file) => {
+          const type = resolveQuotaProviderType(file);
+          return Boolean(type && getQuotaConfig(type).filterFn(file));
+        }),
+    [fileByName, selectedNames]
+  );
+
+  const filteredQuotaTargets = useMemo(
+    () =>
+      sorted.filter((file) => {
+        const type = resolveQuotaProviderType(file);
+        return Boolean(type && getQuotaConfig(type).filterFn(file));
+      }),
+    [sorted]
+  );
+
+  const allQuotaTargets = useMemo(
+    () =>
+      files.filter((file) => {
+        const type = resolveQuotaProviderType(file);
+        return Boolean(type && getQuotaConfig(type).filterFn(file));
+      }),
+    [files]
+  );
+
   const copyTextWithNotification = useCallback(
     async (text: string) => {
       const copied = await copyToClipboard(text);
@@ -461,6 +556,111 @@ export function AuthFilesPage() {
       );
     },
     [showNotification, t]
+  );
+
+  const refreshQuotaTargets = useCallback(
+    async (targets: AuthFileItem[], scope: 'selected' | 'filtered' | 'all') => {
+      if (disableControls || bulkQuotaState.running) return;
+
+      const uniqueTargets = Array.from(
+        new Map(
+          targets
+            .map((file) => [file.name, file] as const)
+            .filter(([, file]) => {
+              const type = resolveQuotaProviderType(file);
+              return Boolean(type && getQuotaConfig(type).filterFn(file));
+            })
+        ).values()
+      );
+
+      if (uniqueTargets.length === 0) {
+        showNotification(
+          t('auth_files.bulk_quota_empty', {
+            defaultValue: 'No refreshable quota credentials in this range',
+          }),
+          'warning'
+        );
+        return;
+      }
+
+      setBulkQuotaState({
+        running: true,
+        scope,
+        total: uniqueTargets.length,
+        done: 0,
+        succeeded: 0,
+        failed: 0,
+      });
+
+      const failedNames: string[] = [];
+      const quotaStore = useQuotaStore.getState();
+
+      const markProgress = (success: boolean, name: string) => {
+        if (!success) failedNames.push(name);
+        setBulkQuotaState((prev) => ({
+          ...prev,
+          done: prev.done + 1,
+          succeeded: prev.succeeded + (success ? 1 : 0),
+          failed: prev.failed + (success ? 0 : 1),
+        }));
+      };
+
+      await runWithConcurrency(uniqueTargets, BULK_QUOTA_CONCURRENCY, async (file) => {
+        const type = resolveQuotaProviderType(file);
+        if (!type) return;
+
+        const config = getQuotaConfig(type) as unknown as {
+          fetchQuota: (file: AuthFileItem, t: TFunction) => Promise<unknown>;
+          buildLoadingState: () => unknown;
+          buildSuccessState: (data: unknown) => unknown;
+          buildErrorState: (message: string, status?: number) => unknown;
+          storeSetter: keyof ReturnType<typeof useQuotaStore.getState>;
+        };
+        const setQuota = quotaStore[config.storeSetter] as unknown as (
+          updater: (prev: Record<string, unknown>) => Record<string, unknown>
+        ) => void;
+
+        setQuota((prev) => ({ ...prev, [file.name]: config.buildLoadingState() }));
+
+        try {
+          const data = await config.fetchQuota(file, t);
+          setQuota((prev) => ({ ...prev, [file.name]: config.buildSuccessState(data) }));
+          markProgress(true, file.name);
+        } catch (err: unknown) {
+          const message = err instanceof Error ? err.message : t('common.unknown_error');
+          const status = getStatusFromError(err);
+          setQuota((prev) => ({
+            ...prev,
+            [file.name]: config.buildErrorState(message, status),
+          }));
+          markProgress(false, file.name);
+        }
+      });
+
+      setBulkQuotaState((prev) => ({ ...prev, running: false }));
+
+      if (failedNames.length === 0) {
+        showNotification(
+          t('auth_files.bulk_quota_success', {
+            count: uniqueTargets.length,
+            defaultValue: 'Quota refreshed for {{count}} credentials',
+          }),
+          'success'
+        );
+      } else {
+        showNotification(
+          t('auth_files.bulk_quota_partial', {
+            success: uniqueTargets.length - failedNames.length,
+            failed: failedNames.length,
+            names: failedNames.slice(0, 3).join(', '),
+            defaultValue:
+              'Quota refresh finished: {{success}} succeeded, {{failed}} failed. {{names}}',
+          }),
+          'warning'
+        );
+      }
+    },
+    [bulkQuotaState.running, disableControls, showNotification, t]
   );
 
   const openExcludedEditor = useCallback(
@@ -963,6 +1163,48 @@ export function AuthFilesPage() {
                   <Button
                     variant="secondary"
                     size="sm"
+                    onClick={() => void refreshQuotaTargets(selectedQuotaTargets, 'selected')}
+                    disabled={
+                      disableControls ||
+                      bulkQuotaState.running ||
+                      selectedQuotaTargets.length === 0
+                    }
+                  >
+                    {t('auth_files.batch_refresh_selected_quota', {
+                      defaultValue: 'Refresh selected quota',
+                    })}
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => void refreshQuotaTargets(filteredQuotaTargets, 'filtered')}
+                    disabled={
+                      disableControls ||
+                      bulkQuotaState.running ||
+                      filteredQuotaTargets.length === 0
+                    }
+                  >
+                    {t('auth_files.batch_refresh_filtered_quota', {
+                      defaultValue: 'Refresh filtered quota',
+                    })}
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => void refreshQuotaTargets(allQuotaTargets, 'all')}
+                    disabled={
+                      disableControls ||
+                      bulkQuotaState.running ||
+                      allQuotaTargets.length === 0
+                    }
+                  >
+                    {t('auth_files.batch_refresh_all_quota', {
+                      defaultValue: 'Refresh all quota',
+                    })}
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    size="sm"
                     onClick={() => void batchDownload(selectedNames)}
                     disabled={disableControls || selectedNames.length === 0}
                   >
@@ -992,6 +1234,18 @@ export function AuthFilesPage() {
                     {t('common.delete')}
                   </Button>
                 </div>
+                {bulkQuotaState.running && (
+                  <div className={styles.batchQuotaStatus}>
+                    {t('auth_files.bulk_quota_progress', {
+                      done: bulkQuotaState.done,
+                      total: bulkQuotaState.total,
+                      succeeded: bulkQuotaState.succeeded,
+                      failed: bulkQuotaState.failed,
+                      defaultValue:
+                        'Quota refresh {{done}}/{{total}} · {{succeeded}} succeeded · {{failed}} failed',
+                    })}
+                  </div>
+                )}
               </div>
             </div>,
             document.body

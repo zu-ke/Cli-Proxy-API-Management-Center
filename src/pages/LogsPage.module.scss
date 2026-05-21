@@ -124,11 +124,46 @@
 .filterPanelHeader {
   display: flex;
   align-items: center;
+  gap: $spacing-sm;
   flex: 1 1 100%;
+  flex-wrap: wrap;
 }
 
 .filterPanelToggle {
   white-space: nowrap;
+}
+
+.limitControl {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 0 8px;
+  border: 1px solid var(--border-color);
+  border-radius: $radius-md;
+  background: var(--bg-primary);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.limitSelect {
+  min-width: 76px;
+  height: 26px;
+  border: 0;
+  border-radius: $radius-sm;
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  font-size: 12px;
+  font-weight: 700;
+  outline: none;
+  cursor: pointer;
+
+  &:disabled {
+    cursor: not-allowed;
+    opacity: 0.65;
+  }
 }
 
 .filterPanelButtonContent {
@@ -157,6 +192,18 @@
   background: var(--bg-secondary);
   border: 1px solid var(--border-color);
   border-radius: $radius-md;
+}
+
+.operatorFilters {
+  display: grid;
+  grid-template-columns: minmax(130px, 180px) minmax(120px, 160px) minmax(150px, 220px) auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.compactInput {
+  height: 32px;
+  font-size: 12px !important;
 }
 
 .filterChipGroup {
@@ -231,6 +278,11 @@
     width: 100%;
   }
 
+  .limitControl {
+    width: 100%;
+    justify-content: space-between;
+  }
+
   .filterPanelToggle {
     width: 100%;
   }
@@ -249,6 +301,11 @@
   .filterChipLabel {
     min-width: 0;
     line-height: 1.2;
+  }
+
+  .operatorFilters {
+    grid-template-columns: 1fr;
+    align-items: stretch;
   }
 }
 

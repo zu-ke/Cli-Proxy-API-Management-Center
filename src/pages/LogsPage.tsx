@@ -30,6 +30,7 @@ import { MANAGEMENT_API_PREFIX } from '@/utils/constants';
 import { formatUnixTimestamp } from '@/utils/format';
 import {
   HTTP_METHODS,
+  LOG_LEVELS,
   STATUS_GROUPS,
   resolveStatusGroup,
   type LogState,
@@ -48,6 +49,7 @@ interface ErrorLogItem {
 // 初始只渲染最近 100 行，滚动到顶部再逐步加载更多（避免一次性渲染过多导致卡顿）
 const INITIAL_DISPLAY_LINES = 100;
 const MAX_BUFFER_LINES = 10000;
+const LOG_LIMIT_OPTIONS = [200, 500, 1000, 2000, 5000] as const;
 const LONG_PRESS_MS = 650;
 const LONG_PRESS_MOVE_THRESHOLD = 10;
 
@@ -82,6 +84,7 @@ export function LogsPage() {
     true
   );
   const [showRawLogs, setShowRawLogs] = useLocalStorage('logsPage.showRawLogs', false);
+  const [logLimit, setLogLimit] = useLocalStorage<number>('logsPage.limit', 1000);
   const [structuredFiltersExpanded, setStructuredFiltersExpanded] = useLocalStorage(
     'logsPage.structuredFiltersExpanded',
     true
@@ -136,7 +139,9 @@ export function LogsPage() {
       }
 
       const params =
-        incremental && latestTimestampRef.current > 0 ? { after: latestTimestampRef.current } : {};
+        incremental && latestTimestampRef.current > 0
+          ? { after: latestTimestampRef.current, limit: logLimit }
+          : { limit: logLimit };
       const data = await logsApi.fetchLogs(params);
 
       // 更新时间戳
@@ -263,6 +268,13 @@ export function LogsPage() {
   }, [connectionStatus]);
 
   useEffect(() => {
+    if (connectionStatus !== 'connected') return;
+    latestTimestampRef.current = 0;
+    void loadLogs(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [logLimit]);
+
+  useEffect(() => {
     if (activeTab !== 'errors') return;
     if (connectionStatus !== 'connected') return;
     void loadErrorLogs();
@@ -307,9 +319,20 @@ export function LogsPage() {
   const filters = useLogFilters({ parsedLines: parsedSearchLines });
   const structuredFiltersPanelId = 'logs-structured-filters';
   const structuredFilterCount =
-    filters.methodFilters.length + filters.statusFilters.length + filters.pathFilters.length;
+    filters.methodFilters.length +
+    filters.statusFilters.length +
+    filters.pathFilters.length +
+    filters.levelFilters.length +
+    (filters.requestIdFilter.trim() ? 1 : 0) +
+    (filters.ipFilter.trim() ? 1 : 0) +
+    (filters.sourceFilter.trim() ? 1 : 0) +
+    (filters.onlyErrors ? 1 : 0);
 
   const { filteredParsedLines, filteredLines, removedCount } = useMemo(() => {
+    const requestIdQuery = filters.requestIdFilter.trim().toLowerCase();
+    const ipQuery = filters.ipFilter.trim().toLowerCase();
+    const sourceQuery = filters.sourceFilter.trim().toLowerCase();
+
     const filteredParsed = parsedSearchLines.filter((line) => {
       if (
         filters.methodFilterSet.size > 0 &&
@@ -330,6 +353,34 @@ export function LogsPage() {
         return false;
       }
 
+      if (
+        filters.levelFilterSet.size > 0 &&
+        (!line.level || !filters.levelFilterSet.has(line.level))
+      ) {
+        return false;
+      }
+
+      if (requestIdQuery && !line.requestId?.toLowerCase().includes(requestIdQuery)) {
+        return false;
+      }
+
+      if (ipQuery && !line.ip?.toLowerCase().includes(ipQuery)) {
+        return false;
+      }
+
+      if (sourceQuery && !line.source?.toLowerCase().includes(sourceQuery)) {
+        return false;
+      }
+
+      if (
+        filters.onlyErrors &&
+        line.level !== 'error' &&
+        line.level !== 'fatal' &&
+        (typeof line.statusCode !== 'number' || line.statusCode < 500)
+      ) {
+        return false;
+      }
+
       return true;
     });
 
@@ -341,6 +392,11 @@ export function LogsPage() {
   }, [
     baseLines,
     filters.methodFilterSet,
+    filters.levelFilterSet,
+    filters.requestIdFilter,
+    filters.ipFilter,
+    filters.sourceFilter,
+    filters.onlyErrors,
     filters.pathFilterSet,
     filters.statusFilterSet,
     parsedSearchLines
@@ -502,6 +558,23 @@ export function LogsPage() {
               </div>
 
               <div className={styles.filterPanelHeader}>
+                <label className={styles.limitControl}>
+                  <span>{t('logs.limit_label', { defaultValue: 'Limit' })}</span>
+                  <select
+                    className={styles.limitSelect}
+                    value={logLimit}
+                    onChange={(event) => setLogLimit(Number(event.target.value))}
+                    disabled={disableControls || loading}
+                    aria-label={t('logs.limit_label', { defaultValue: 'Limit' })}
+                  >
+                    {LOG_LIMIT_OPTIONS.map((limit) => (
+                      <option key={limit} value={limit}>
+                        {limit}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
                 <Button
                   type="button"
                   variant="secondary"
@@ -535,6 +608,68 @@ export function LogsPage() {
 
               {structuredFiltersExpanded && (
                 <div id={structuredFiltersPanelId} className={styles.structuredFilters}>
+                  <div className={styles.operatorFilters}>
+                    <Input
+                      value={filters.requestIdFilter}
+                      onChange={(e) => filters.setRequestIdFilter(e.target.value)}
+                      placeholder={t('logs.filter_request_id_placeholder', {
+                        defaultValue: 'Request ID',
+                      })}
+                      className={styles.compactInput}
+                    />
+                    <Input
+                      value={filters.ipFilter}
+                      onChange={(e) => filters.setIpFilter(e.target.value)}
+                      placeholder={t('logs.filter_ip_placeholder', { defaultValue: 'IP' })}
+                      className={styles.compactInput}
+                    />
+                    <Input
+                      value={filters.sourceFilter}
+                      onChange={(e) => filters.setSourceFilter(e.target.value)}
+                      placeholder={t('logs.filter_source_placeholder', { defaultValue: 'Source' })}
+                      className={styles.compactInput}
+                      list="logs-source-options"
+                    />
+                    <datalist id="logs-source-options">
+                      {filters.sourceOptions.map(({ source }) => (
+                        <option key={source} value={source} />
+                      ))}
+                    </datalist>
+                    <ToggleSwitch
+                      checked={filters.onlyErrors}
+                      onChange={filters.setOnlyErrors}
+                      label={
+                        <span className={styles.switchLabel}>
+                          {t('logs.filter_only_errors', { defaultValue: 'Errors only' })}
+                        </span>
+                      }
+                    />
+                  </div>
+
+                  <div className={styles.filterChipGroup}>
+                    <span className={styles.filterChipLabel}>
+                      {t('logs.filter_level', { defaultValue: 'Level' })}
+                    </span>
+                    <div className={styles.filterChipList}>
+                      {LOG_LEVELS.map((level) => {
+                        const active = filters.levelFilters.includes(level);
+                        const count = filters.levelCounts[level] ?? 0;
+                        return (
+                          <button
+                            key={level}
+                            type="button"
+                            className={`${styles.filterChip} ${active ? styles.filterChipActive : ''}`}
+                            onClick={() => filters.toggleLevelFilter(level)}
+                            disabled={count === 0 && !active}
+                            aria-pressed={active}
+                          >
+                            {level.toUpperCase()} ({count})
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
                   <div className={styles.filterChipGroup}>
                     <span className={styles.filterChipLabel}>{t('logs.filter_method')}</span>
                     <div className={styles.filterChipList}>

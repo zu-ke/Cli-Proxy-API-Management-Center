@@ -1607,6 +1607,7 @@
   backdrop-filter: var(--glass-backdrop-filter);
   -webkit-backdrop-filter: var(--glass-backdrop-filter);
   box-shadow: var(--shadow-lg);
+  flex-wrap: wrap;
 }
 
 .batchActionLeft,
@@ -1619,6 +1620,16 @@
 
 .batchActionRight {
   justify-content: flex-end;
+}
+
+.batchQuotaStatus {
+  flex: 1 0 100%;
+  padding-top: 4px;
+  border-top: 1px solid color-mix(in srgb, var(--border-color) 58%, transparent);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 650;
+  text-align: right;
 }
 
 .batchSelectionText {
@@ -1643,6 +1654,10 @@
   .batchActionLeft,
   .batchActionRight {
     justify-content: center;
+  }
+
+  .batchQuotaStatus {
+    text-align: center;
   }
 }
 

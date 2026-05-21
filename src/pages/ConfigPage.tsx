@@ -19,6 +19,8 @@ import { useMediaQuery } from '@/hooks/useMediaQuery';
 import { useVisualConfig } from '@/hooks/useVisualConfig';
 import { useNotificationStore, useAuthStore, useThemeStore, useConfigStore } from '@/stores';
 import { configFileApi } from '@/services/api/configFile';
+import { copyToClipboard } from '@/utils/clipboard';
+import { downloadBlob } from '@/utils/download';
 import styles from './ConfigPage.module.scss';
 
 type ConfigEditorTab = 'visual' | 'source';
@@ -379,6 +381,27 @@ export function ConfigPage() {
     performSearch(lastSearchedQuery, 'next');
   }, [lastSearchedQuery, performSearch]);
 
+  const handleCopyConfig = useCallback(async () => {
+    const copied = await copyToClipboard(content);
+    showNotification(
+      copied
+        ? t('config_management.copy_success', { defaultValue: 'Configuration copied' })
+        : t('notification.copy_failed', { defaultValue: 'Copy failed' }),
+      copied ? 'success' : 'error'
+    );
+  }, [content, showNotification, t]);
+
+  const handleDownloadConfig = useCallback(() => {
+    downloadBlob({
+      filename: 'config.yaml',
+      blob: new Blob([content], { type: 'application/yaml;charset=utf-8' }),
+    });
+    showNotification(
+      t('config_management.download_success', { defaultValue: 'Configuration downloaded' }),
+      'success'
+    );
+  }, [content, showNotification, t]);
+
   // Keep bottom floating actions from covering page content by syncing its height to a CSS variable.
   useLayoutEffect(() => {
     if (typeof window === 'undefined' || !shouldRenderFloatingActions) return;
@@ -603,6 +626,25 @@ export function ConfigPage() {
                     title={t('config_management.search_next', { defaultValue: '下一个' })}
                   >
                     <IconChevronDown size={16} />
+                  </Button>
+                </div>
+
+                <div className={styles.sourceUtilityActions}>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => void handleCopyConfig()}
+                    disabled={!content}
+                  >
+                    {t('config_management.copy_config', { defaultValue: 'Copy YAML' })}
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={handleDownloadConfig}
+                    disabled={!content}
+                  >
+                    {t('config_management.download_config', { defaultValue: 'Download YAML' })}
                   </Button>
                 </div>
               </div>

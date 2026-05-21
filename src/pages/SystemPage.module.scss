@@ -153,6 +153,89 @@
   align-items: center;
 }
 
+.settingsGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: $spacing-sm;
+}
+
+.settingRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: $spacing-md;
+  min-width: 0;
+  padding: $spacing-md;
+  border: 1px solid var(--border-color);
+  border-radius: $radius-md;
+  background-color: var(--bg-secondary);
+}
+
+.settingMeta {
+  min-width: 0;
+}
+
+.settingTitle {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  line-height: 1.35;
+}
+
+.settingDesc {
+  margin-top: 3px;
+  font-size: 12px;
+  color: var(--text-tertiary);
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.settingControl {
+  width: min(220px, 42vw);
+}
+
+.inlineEditor {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: $spacing-xs;
+  min-width: 0;
+
+  input {
+    width: 92px;
+    min-width: 0;
+    height: 34px;
+    padding: 0 $spacing-sm;
+    border: 1px solid var(--border-color);
+    border-radius: $radius-md;
+    background-color: var(--bg-primary);
+    color: var(--text-primary);
+    font-size: 14px;
+
+    &:disabled {
+      cursor: not-allowed;
+      opacity: 0.65;
+    }
+  }
+}
+
+.settingsHint {
+  margin-top: $spacing-md;
+  font-size: 13px;
+  color: var(--text-tertiary);
+}
+
+.operationGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: $spacing-sm;
+
+  :global(.btn) {
+    justify-content: center;
+    min-width: 0;
+  }
+}
+
 .infoGrid {
   display: grid;
   gap: $spacing-sm;
@@ -348,6 +431,32 @@
 }
 
 @media (max-width: 768px) {
+  .settingsGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .settingRow {
+    grid-template-columns: minmax(0, 1fr);
+    align-items: stretch;
+  }
+
+  .settingControl {
+    width: 100%;
+  }
+
+  .inlineEditor {
+    justify-content: stretch;
+
+    input {
+      flex: 1;
+      width: auto;
+    }
+  }
+
+  .operationGrid {
+    grid-template-columns: 1fr;
+  }
+
   .aboutLogo {
     width: 92px;
     height: 92px;

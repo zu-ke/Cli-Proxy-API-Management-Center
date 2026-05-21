@@ -4,6 +4,7 @@ export type HttpMethod = (typeof HTTP_METHODS)[number];
 export const STATUS_GROUPS = ['2xx', '3xx', '4xx', '5xx'] as const;
 export type StatusGroup = (typeof STATUS_GROUPS)[number];
 
+export const LOG_LEVELS = ['trace', 'debug', 'info', 'warn', 'error', 'fatal'] as const;
 export type LogLevel = 'trace' | 'debug' | 'info' | 'warn' | 'error' | 'fatal';
 
 export type LogState = {

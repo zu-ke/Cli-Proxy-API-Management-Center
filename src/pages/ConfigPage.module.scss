@@ -100,7 +100,7 @@
 
 .sourceToolbar {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto auto;
   gap: 8px;
   align-items: center;
   padding: 8px;
@@ -110,6 +110,22 @@
 
   @include mobile {
     grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.sourceUtilityActions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+
+  @include mobile {
+    justify-content: stretch;
+
+    button {
+      flex: 1 1 140px;
+    }
   }
 }
 

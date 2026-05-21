@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Modal } from '@/components/ui/Modal';
+import { Select } from '@/components/ui/Select';
 import { ToggleSwitch } from '@/components/ui/ToggleSwitch';
 import { IconGithub, IconBookOpen, IconExternalLink, IconCode } from '@/components/ui/icons';
 import {
@@ -14,6 +15,7 @@ import {
 } from '@/stores';
 import { configApi, versionApi } from '@/services/api';
 import { apiKeysApi } from '@/services/api/apiKeys';
+import type { RawConfigSection } from '@/types/config';
 import { classifyModels } from '@/utils/models';
 import { STORAGE_KEY_AUTH } from '@/utils/constants';
 import { INLINE_LOGO_JPEG } from '@/assets/logoInline';
@@ -69,6 +71,11 @@ const compareVersions = (latest?: string | null, current?: string | null) => {
   return 0;
 };
 
+type OperationKey = 'config-cache' | 'model-cache' | 'version-check' | 'clear-login';
+
+const getErrorMessage = (error: unknown) =>
+  error instanceof Error ? error.message : typeof error === 'string' ? error : '';
+
 export function SystemPage() {
   const { t, i18n } = useTranslation();
   const { showNotification, showConfirmation } = useNotificationStore();
@@ -93,6 +100,14 @@ export function SystemPage() {
   const [requestLogTouched, setRequestLogTouched] = useState(false);
   const [requestLogSaving, setRequestLogSaving] = useState(false);
   const [checkingVersion, setCheckingVersion] = useState(false);
+  const [savingSettings, setSavingSettings] = useState<Partial<Record<RawConfigSection, boolean>>>(
+    {}
+  );
+  const [runningOperations, setRunningOperations] = useState<
+    Partial<Record<OperationKey, boolean>>
+  >({});
+  const [requestRetryInput, setRequestRetryInput] = useState('');
+  const [logsMaxSizeInput, setLogsMaxSizeInput] = useState('');
 
   const apiKeysCache = useRef<string[]>([]);
   const versionTapCount = useRef(0);
@@ -106,6 +121,7 @@ export function SystemPage() {
   const requestLogEnabled = config?.requestLog ?? false;
   const requestLogDirty = requestLogDraft !== requestLogEnabled;
   const canEditRequestLog = auth.connectionStatus === 'connected' && Boolean(config);
+  const canEditSettings = auth.connectionStatus === 'connected' && Boolean(config);
 
   const appVersion = __APP_VERSION__ || t('system_info.version_unknown');
   const apiVersion = auth.serverVersion || t('system_info.version_unknown');
@@ -119,6 +135,24 @@ export function SystemPage() {
     if (typeof iconEntry === 'string') return iconEntry;
     return resolvedTheme === 'dark' ? iconEntry.dark : iconEntry.light;
   };
+
+  const routingOptions = useMemo(
+    () => [
+      {
+        value: 'round-robin',
+        label: t('basic_settings.routing_strategy_round_robin', {
+          defaultValue: 'round-robin (cycle)',
+        }),
+      },
+      {
+        value: 'fill-first',
+        label: t('basic_settings.routing_strategy_fill_first', {
+          defaultValue: 'fill-first (prioritize)',
+        }),
+      },
+    ],
+    [t]
+  );
 
   const normalizeApiKeyList = (input: unknown): string[] => {
     if (!Array.isArray(input)) return [];
@@ -175,12 +209,12 @@ export function SystemPage() {
         type: 'warning',
         message: t('notification.connection_required'),
       });
-      return;
+      return false;
     }
 
     if (!auth.apiBase) {
       showNotification(t('notification.connection_required'), 'warning');
-      return;
+      return false;
     }
 
     if (forceRefresh) {
@@ -199,11 +233,162 @@ export function SystemPage() {
           ? t('system_info.models_count', { count: list.length })
           : t('system_info.models_empty'),
       });
+      return true;
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : typeof err === 'string' ? err : '';
       const suffix = message ? `: ${message}` : '';
       const text = `${t('system_info.models_error')}${suffix}`;
       setModelStatus({ type: 'error', message: text });
+      return false;
+    }
+  };
+
+  const setSettingSaving = (section: RawConfigSection, value: boolean) => {
+    setSavingSettings((prev) => ({ ...prev, [section]: value }));
+  };
+
+  const setOperationRunning = (operation: OperationKey, value: boolean) => {
+    setRunningOperations((prev) => ({ ...prev, [operation]: value }));
+  };
+
+  const saveConfigValue = useCallback(
+    async (
+      section: RawConfigSection,
+      value: boolean | number | string,
+      previousValue: unknown,
+      request: () => Promise<unknown>,
+      successMessage: string
+    ) => {
+      if (!canEditSettings) {
+        showNotification(t('notification.connection_required'), 'warning');
+        return;
+      }
+
+      setSettingSaving(section, true);
+      updateConfigValue(section, value);
+
+      try {
+        await request();
+        clearCache(section);
+        await fetchConfig(section, true);
+        showNotification(successMessage, 'success');
+      } catch (error: unknown) {
+        const message = getErrorMessage(error);
+        updateConfigValue(section, previousValue);
+        showNotification(
+          `${t('notification.update_failed')}${message ? `: ${message}` : ''}`,
+          'error'
+        );
+      } finally {
+        setSettingSaving(section, false);
+      }
+    },
+    [canEditSettings, clearCache, fetchConfig, showNotification, t, updateConfigValue]
+  );
+
+  const handleBooleanSettingChange = (
+    section: RawConfigSection,
+    value: boolean,
+    previousValue: boolean | undefined,
+    request: (enabled: boolean) => Promise<unknown>,
+    successMessage: string
+  ) => {
+    void saveConfigValue(section, value, previousValue, () => request(value), successMessage);
+  };
+
+  const handleRequestRetrySave = () => {
+    const retryCount = Number(requestRetryInput);
+    if (!Number.isInteger(retryCount) || retryCount < 0) {
+      showNotification(
+        t('system_info.invalid_non_negative_integer', {
+          defaultValue: 'Please enter a non-negative integer.',
+        }),
+        'warning'
+      );
+      return;
+    }
+
+    void saveConfigValue(
+      'request-retry',
+      retryCount,
+      config?.requestRetry,
+      () => configApi.updateRequestRetry(retryCount),
+      t('system_info.request_retry_updated', { defaultValue: 'Request retry updated' })
+    );
+  };
+
+  const handleLogsMaxSizeSave = () => {
+    const sizeMb = Number(logsMaxSizeInput);
+    if (!Number.isInteger(sizeMb) || sizeMb < 0) {
+      showNotification(
+        t('system_info.invalid_non_negative_integer', {
+          defaultValue: 'Please enter a non-negative integer.',
+        }),
+        'warning'
+      );
+      return;
+    }
+
+    void saveConfigValue(
+      'logs-max-total-size-mb',
+      sizeMb,
+      config?.logsMaxTotalSizeMb,
+      () => configApi.updateLogsMaxTotalSizeMb(sizeMb),
+      t('system_info.logs_max_size_updated', { defaultValue: 'Log size limit updated' })
+    );
+  };
+
+  const handleRoutingStrategyChange = (value: string) => {
+    void saveConfigValue(
+      'routing/strategy',
+      value,
+      config?.routingStrategy,
+      () => configApi.updateRoutingStrategy(value),
+      t('basic_settings.routing_strategy_updated', {
+        defaultValue: 'Routing strategy updated',
+      })
+    );
+  };
+
+  const handleRefreshConfigCache = async () => {
+    if (auth.connectionStatus !== 'connected') {
+      showNotification(t('notification.connection_required'), 'warning');
+      return;
+    }
+
+    setOperationRunning('config-cache', true);
+    try {
+      clearCache();
+      await fetchConfig(undefined, true);
+      showNotification(
+        t('system_info.config_cache_refreshed', { defaultValue: 'Configuration cache refreshed' }),
+        'success'
+      );
+    } catch (error: unknown) {
+      const message = getErrorMessage(error);
+      showNotification(
+        `${t('system_info.config_cache_refresh_failed', {
+          defaultValue: 'Failed to refresh configuration cache',
+        })}${message ? `: ${message}` : ''}`,
+        'error'
+      );
+    } finally {
+      setOperationRunning('config-cache', false);
+    }
+  };
+
+  const handleRefreshModelCache = async () => {
+    setOperationRunning('model-cache', true);
+    try {
+      const refreshed = await fetchModels({ forceRefresh: true });
+      if (refreshed) {
+        showNotification(
+          t('system_info.model_cache_refreshed', { defaultValue: 'Model cache refreshed' }),
+          'success'
+        );
+      }
+    } finally {
+      setOperationRunning('model-cache', false);
     }
   };
 
@@ -214,11 +399,23 @@ export function SystemPage() {
       variant: 'danger',
       confirmText: t('common.confirm'),
       onConfirm: () => {
+        setOperationRunning('clear-login', true);
         auth.logout();
-        if (typeof localStorage === 'undefined') return;
-        const keysToRemove = [STORAGE_KEY_AUTH, 'isLoggedIn', 'apiBase', 'apiUrl', 'managementKey'];
-        keysToRemove.forEach((key) => localStorage.removeItem(key));
-        showNotification(t('notification.login_storage_cleared'), 'success');
+        try {
+          if (typeof localStorage !== 'undefined') {
+            const keysToRemove = [
+              STORAGE_KEY_AUTH,
+              'isLoggedIn',
+              'apiBase',
+              'apiUrl',
+              'managementKey',
+            ];
+            keysToRemove.forEach((key) => localStorage.removeItem(key));
+          }
+          showNotification(t('notification.login_storage_cleared'), 'success');
+        } finally {
+          setOperationRunning('clear-login', false);
+        }
       },
     });
   };
@@ -267,11 +464,11 @@ export function SystemPage() {
     try {
       await configApi.updateRequestLog(requestLogDraft);
       clearCache('request-log');
+      await fetchConfig('request-log', true);
       showNotification(t('notification.request_log_updated'), 'success');
       setRequestLogModalOpen(false);
     } catch (error: unknown) {
-      const message =
-        error instanceof Error ? error.message : typeof error === 'string' ? error : '';
+      const message = getErrorMessage(error);
       updateConfigValue('request-log', previous);
       showNotification(
         `${t('notification.update_failed')}${message ? `: ${message}` : ''}`,
@@ -284,6 +481,7 @@ export function SystemPage() {
 
   const handleVersionCheck = useCallback(async () => {
     setCheckingVersion(true);
+    setOperationRunning('version-check', true);
     try {
       const data = await versionApi.checkLatest();
       const latestRaw = data?.['latest-version'] ?? data?.latest_version ?? data?.latest ?? '';
@@ -306,12 +504,12 @@ export function SystemPage() {
         showNotification(t('system_info.version_is_latest'), 'success');
       }
     } catch (error: unknown) {
-      const message =
-        error instanceof Error ? error.message : typeof error === 'string' ? error : '';
+      const message = getErrorMessage(error);
       const suffix = message ? `: ${message}` : '';
       showNotification(`${t('system_info.version_check_error')}${suffix}`, 'error');
     } finally {
       setCheckingVersion(false);
+      setOperationRunning('version-check', false);
     }
   }, [auth.serverVersion, showNotification, t]);
 
@@ -326,6 +524,14 @@ export function SystemPage() {
       setRequestLogDraft(requestLogEnabled);
     }
   }, [requestLogModalOpen, requestLogTouched, requestLogEnabled]);
+
+  useEffect(() => {
+    setRequestRetryInput(String(config?.requestRetry ?? 0));
+  }, [config?.requestRetry]);
+
+  useEffect(() => {
+    setLogsMaxSizeInput(String(config?.logsMaxTotalSizeMb ?? 0));
+  }, [config?.logsMaxTotalSizeMb]);
 
   useEffect(() => {
     return () => {
@@ -391,6 +597,299 @@ export function SystemPage() {
               <div className={styles.tileValue}>{t(`common.${auth.connectionStatus}_status`)}</div>
               <div className={styles.tileSub}>{auth.apiBase || '-'}</div>
             </div>
+          </div>
+        </Card>
+
+        <Card title={t('system_info.quick_settings_title', { defaultValue: 'Quick Settings' })}>
+          <p className={styles.sectionDescription}>
+            {t('system_info.quick_settings_desc', {
+              defaultValue: 'Control common runtime switches and routing behavior.',
+            })}
+          </p>
+          <div className={styles.settingsGrid}>
+            <div className={styles.settingRow}>
+              <div className={styles.settingMeta}>
+                <div className={styles.settingTitle}>
+                  {t('basic_settings.debug_mode', { defaultValue: 'Debug Mode' })}
+                </div>
+                <div className={styles.settingDesc}>
+                  {t('system_info.debug_desc', {
+                    defaultValue: 'Enable verbose diagnostics for troubleshooting.',
+                  })}
+                </div>
+              </div>
+              <ToggleSwitch
+                checked={config?.debug ?? false}
+                disabled={!canEditSettings || savingSettings.debug}
+                ariaLabel={t('basic_settings.debug_mode', { defaultValue: 'Debug Mode' })}
+                onChange={(value) =>
+                  handleBooleanSettingChange(
+                    'debug',
+                    value,
+                    config?.debug,
+                    configApi.updateDebug,
+                    t('system_info.debug_updated', { defaultValue: 'Debug mode updated' })
+                  )
+                }
+              />
+            </div>
+
+            <div className={styles.settingRow}>
+              <div className={styles.settingMeta}>
+                <div className={styles.settingTitle}>
+                  {t('basic_settings.request_log_title', { defaultValue: 'Request Log' })}
+                </div>
+                <div className={styles.settingDesc}>
+                  {t('system_info.request_log_desc', {
+                    defaultValue: 'Capture request details for diagnostics.',
+                  })}
+                </div>
+              </div>
+              <ToggleSwitch
+                checked={config?.requestLog ?? false}
+                disabled={!canEditSettings || savingSettings['request-log']}
+                ariaLabel={t('basic_settings.request_log_title', { defaultValue: 'Request Log' })}
+                onChange={(value) =>
+                  handleBooleanSettingChange(
+                    'request-log',
+                    value,
+                    config?.requestLog,
+                    configApi.updateRequestLog,
+                    t('notification.request_log_updated', { defaultValue: 'Request log updated' })
+                  )
+                }
+              />
+            </div>
+
+            <div className={styles.settingRow}>
+              <div className={styles.settingMeta}>
+                <div className={styles.settingTitle}>
+                  {t('basic_settings.logging_to_file', { defaultValue: 'Logging to File' })}
+                </div>
+                <div className={styles.settingDesc}>
+                  {t('system_info.logging_to_file_desc', {
+                    defaultValue: 'Persist runtime logs to server files.',
+                  })}
+                </div>
+              </div>
+              <ToggleSwitch
+                checked={config?.loggingToFile ?? false}
+                disabled={!canEditSettings || savingSettings['logging-to-file']}
+                ariaLabel={t('basic_settings.logging_to_file', {
+                  defaultValue: 'Logging to File',
+                })}
+                onChange={(value) =>
+                  handleBooleanSettingChange(
+                    'logging-to-file',
+                    value,
+                    config?.loggingToFile,
+                    configApi.updateLoggingToFile,
+                    t('system_info.logging_to_file_updated', {
+                      defaultValue: 'Logging to file updated',
+                    })
+                  )
+                }
+              />
+            </div>
+
+            <div className={styles.settingRow}>
+              <div className={styles.settingMeta}>
+                <div className={styles.settingTitle}>
+                  {t('basic_settings.ws_auth', { defaultValue: 'WebSocket Auth' })}
+                </div>
+                <div className={styles.settingDesc}>
+                  {t('system_info.ws_auth_desc', {
+                    defaultValue: 'Require authentication for WebSocket connections.',
+                  })}
+                </div>
+              </div>
+              <ToggleSwitch
+                checked={config?.wsAuth ?? false}
+                disabled={!canEditSettings || savingSettings['ws-auth']}
+                ariaLabel={t('basic_settings.ws_auth', { defaultValue: 'WebSocket Auth' })}
+                onChange={(value) =>
+                  handleBooleanSettingChange(
+                    'ws-auth',
+                    value,
+                    config?.wsAuth,
+                    configApi.updateWsAuth,
+                    t('system_info.ws_auth_updated', { defaultValue: 'WebSocket auth updated' })
+                  )
+                }
+              />
+            </div>
+
+            <div className={styles.settingRow}>
+              <div className={styles.settingMeta}>
+                <div className={styles.settingTitle}>
+                  {t('basic_settings.force_model_prefix', {
+                    defaultValue: 'Force Model Prefix',
+                  })}
+                </div>
+                <div className={styles.settingDesc}>
+                  {t('system_info.force_model_prefix_desc', {
+                    defaultValue: 'Require provider prefixes in model names.',
+                  })}
+                </div>
+              </div>
+              <ToggleSwitch
+                checked={config?.forceModelPrefix ?? false}
+                disabled={!canEditSettings || savingSettings['force-model-prefix']}
+                ariaLabel={t('basic_settings.force_model_prefix', {
+                  defaultValue: 'Force Model Prefix',
+                })}
+                onChange={(value) =>
+                  handleBooleanSettingChange(
+                    'force-model-prefix',
+                    value,
+                    config?.forceModelPrefix,
+                    configApi.updateForceModelPrefix,
+                    t('system_info.force_model_prefix_updated', {
+                      defaultValue: 'Force model prefix updated',
+                    })
+                  )
+                }
+              />
+            </div>
+
+            <div className={styles.settingRow}>
+              <div className={styles.settingMeta}>
+                <div className={styles.settingTitle}>
+                  {t('basic_settings.routing_strategy', { defaultValue: 'Routing Strategy' })}
+                </div>
+                <div className={styles.settingDesc}>
+                  {t('basic_settings.routing_strategy_hint', {
+                    defaultValue: 'Select credential selection strategy.',
+                  })}
+                </div>
+              </div>
+              <div className={styles.settingControl}>
+                <Select
+                  value={config?.routingStrategy || 'round-robin'}
+                  options={routingOptions}
+                  onChange={handleRoutingStrategyChange}
+                  disabled={!canEditSettings || savingSettings['routing/strategy']}
+                  ariaLabel={t('basic_settings.routing_strategy', {
+                    defaultValue: 'Routing Strategy',
+                  })}
+                />
+              </div>
+            </div>
+
+            <div className={styles.settingRow}>
+              <div className={styles.settingMeta}>
+                <div className={styles.settingTitle}>
+                  {t('basic_settings.request_retry', { defaultValue: 'Request Retry' })}
+                </div>
+                <div className={styles.settingDesc}>
+                  {t('system_info.request_retry_desc', {
+                    defaultValue: 'Retry count for failed upstream requests.',
+                  })}
+                </div>
+              </div>
+              <div className={styles.inlineEditor}>
+                <input
+                  type="number"
+                  min="0"
+                  step="1"
+                  value={requestRetryInput}
+                  disabled={!canEditSettings || savingSettings['request-retry']}
+                  onChange={(event) => setRequestRetryInput(event.target.value)}
+                  aria-label={t('basic_settings.request_retry', { defaultValue: 'Request Retry' })}
+                />
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={handleRequestRetrySave}
+                  loading={savingSettings['request-retry']}
+                  disabled={!canEditSettings}
+                >
+                  {t('common.save')}
+                </Button>
+              </div>
+            </div>
+
+            <div className={styles.settingRow}>
+              <div className={styles.settingMeta}>
+                <div className={styles.settingTitle}>
+                  {t('basic_settings.logs_max_total_size_mb', {
+                    defaultValue: 'Max Log Size (MB)',
+                  })}
+                </div>
+                <div className={styles.settingDesc}>
+                  {t('system_info.logs_max_size_desc', {
+                    defaultValue: 'Maximum total size retained for server log files.',
+                  })}
+                </div>
+              </div>
+              <div className={styles.inlineEditor}>
+                <input
+                  type="number"
+                  min="0"
+                  step="1"
+                  value={logsMaxSizeInput}
+                  disabled={!canEditSettings || savingSettings['logs-max-total-size-mb']}
+                  onChange={(event) => setLogsMaxSizeInput(event.target.value)}
+                  aria-label={t('basic_settings.logs_max_total_size_mb', {
+                    defaultValue: 'Max Log Size (MB)',
+                  })}
+                />
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={handleLogsMaxSizeSave}
+                  loading={savingSettings['logs-max-total-size-mb']}
+                  disabled={!canEditSettings}
+                >
+                  {t('common.save')}
+                </Button>
+              </div>
+            </div>
+          </div>
+          {!canEditSettings && (
+            <div className={styles.settingsHint}>{t('notification.connection_required')}</div>
+          )}
+        </Card>
+
+        <Card title={t('system_info.operations_title', { defaultValue: 'Operations' })}>
+          <p className={styles.sectionDescription}>
+            {t('system_info.operations_desc', {
+              defaultValue: 'Refresh server-side state and local session data.',
+            })}
+          </p>
+          <div className={styles.operationGrid}>
+            <Button
+              variant="secondary"
+              onClick={() => void handleRefreshConfigCache()}
+              loading={runningOperations['config-cache']}
+              disabled={auth.connectionStatus !== 'connected'}
+            >
+              {t('system_info.refresh_config_cache', {
+                defaultValue: 'Refresh Configuration Cache',
+              })}
+            </Button>
+            <Button
+              variant="secondary"
+              onClick={() => void handleRefreshModelCache()}
+              loading={runningOperations['model-cache'] || modelsLoading}
+              disabled={auth.connectionStatus !== 'connected'}
+            >
+              {t('system_info.refresh_model_cache', { defaultValue: 'Refresh Model Cache' })}
+            </Button>
+            <Button
+              variant="secondary"
+              onClick={() => void handleVersionCheck()}
+              loading={runningOperations['version-check'] || checkingVersion}
+            >
+              {t('system_info.version_check_button', { defaultValue: 'Check Version' })}
+            </Button>
+            <Button
+              variant="danger"
+              onClick={handleClearLoginStorage}
+              loading={runningOperations['clear-login']}
+            >
+              {t('system_info.clear_login_button')}
+            </Button>
           </div>
         </Card>
 
