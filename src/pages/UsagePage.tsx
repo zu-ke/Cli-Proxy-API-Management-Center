@@ -9,6 +9,7 @@ import { Modal } from '@/components/ui/Modal';
 import { Select, type SelectOption } from '@/components/ui/Select';
 import {
   IconChartLine,
+  IconCopy,
   IconRefreshCw,
   IconSearch,
   IconSlidersHorizontal,
@@ -16,13 +17,15 @@ import {
 import { useHeaderRefresh } from '@/hooks/useHeaderRefresh';
 import { useInterval } from '@/hooks/useInterval';
 import { apiKeyUsageApi, authFilesApi, requestTracesApi } from '@/services/api';
-import { useAuthStore } from '@/stores';
+import { useAuthStore, useNotificationStore } from '@/stores';
 import type {
   AuthFileItem,
+  RequestTraceAttempt,
   RequestTraceDetail,
   RequestTraceStatus,
   RequestTraceSummary,
 } from '@/types';
+import { copyToClipboard } from '@/utils/clipboard';
 import {
   normalizeRecentRequestUsageEntry,
   normalizeUsageTotal,
@@ -189,7 +192,29 @@ const formatTraceTime = (value?: string): string => {
   }).format(new Date(timestamp));
 };
 
-const toJsonPreview = (value: unknown): string => {
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  value !== null && typeof value === 'object' && !Array.isArray(value);
+
+const readNumberValue = (value: unknown): number | null => {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+};
+
+const prettifyPayloadText = (value: string): string => {
+  const trimmed = value.trim();
+  if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) return value;
+  try {
+    return JSON.stringify(JSON.parse(trimmed), null, 2);
+  } catch {
+    return value;
+  }
+};
+
+const stringifyRawPayload = (value: unknown): string => {
   if (value === undefined || value === null || value === '') return '-';
   if (typeof value === 'string') return value;
   try {
@@ -199,10 +224,74 @@ const toJsonPreview = (value: unknown): string => {
   }
 };
 
+interface TracePayloadSnapshot {
+  rawText: string;
+  displayText: string;
+  size: number | null;
+  truncated: boolean;
+  hasContent: boolean;
+}
+
+const getTracePayloadSnapshot = (
+  trace: RequestTraceDetail,
+  key: 'request' | 'response'
+): TracePayloadSnapshot => {
+  const rawRecord = isRecord(trace.raw) ? trace.raw : {};
+  const rawSnapshot = isRecord(rawRecord[key]) ? rawRecord[key] : undefined;
+  const normalizedBody = key === 'request' ? trace.requestBody : trace.responseBody;
+  const rawBody = rawSnapshot && 'body' in rawSnapshot ? rawSnapshot.body : rawRecord[key];
+  const body = normalizedBody ?? rawBody;
+  const hasContent = body !== undefined && body !== null && body !== '';
+  const rawText = hasContent ? stringifyRawPayload(body) : '-';
+  const explicitSize = rawSnapshot ? readNumberValue(rawSnapshot.size) : null;
+
+  return {
+    rawText,
+    displayText: hasContent ? prettifyPayloadText(rawText) : '-',
+    size: explicitSize ?? (hasContent ? rawText.length : 0),
+    truncated: rawSnapshot?.truncated === true,
+    hasContent,
+  };
+};
+
+const formatPayloadSize = (value: number | null): string => {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return '-';
+  if (value < 1024) return `${formatNumber(value)} B`;
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
+  return `${(value / 1024 / 1024).toFixed(2)} MB`;
+};
+
+const getAttemptCredential = (attempt: RequestTraceAttempt): string =>
+  attempt.credentialId ||
+  attempt.credential_id ||
+  attempt.credentialIndex ||
+  attempt.credential_index ||
+  '-';
+
+const getAttemptStatusCode = (attempt: RequestTraceAttempt): number | undefined =>
+  attempt.statusCode ?? attempt.status_code;
+
+const getAttemptDuration = (attempt: RequestTraceAttempt): number | null =>
+  readNumberValue(attempt.durationMs ?? attempt.duration_ms);
+
+const getAttemptRetryAfter = (attempt: RequestTraceAttempt): number | null =>
+  readNumberValue(attempt.retryAfterSeconds ?? attempt.retry_after_seconds);
+
+const getAttemptStatusKind = (attempt: RequestTraceAttempt): 'success' | 'failure' | 'pending' => {
+  if (attempt.success === true) return 'success';
+  if (attempt.success === false) return 'failure';
+  const statusCode = getAttemptStatusCode(attempt);
+  if (typeof statusCode === 'number' && statusCode > 0) {
+    return statusCode >= 400 ? 'failure' : 'success';
+  }
+  return 'pending';
+};
+
 export function UsagePage() {
   const { t } = useTranslation();
   const [searchParams, setSearchParams] = useSearchParams();
   const connectionStatus = useAuthStore((state) => state.connectionStatus);
+  const showNotification = useNotificationStore((state) => state.showNotification);
   const [view, setView] = useState<UsageView>(
     searchParams.get('view') === 'traces' ? 'traces' : 'summary'
   );
@@ -454,6 +543,29 @@ export function UsagePage() {
       }
     },
     [t]
+  );
+
+  const traceRequestPayload = useMemo(
+    () => (selectedTrace ? getTracePayloadSnapshot(selectedTrace, 'request') : null),
+    [selectedTrace]
+  );
+  const traceResponsePayload = useMemo(
+    () => (selectedTrace ? getTracePayloadSnapshot(selectedTrace, 'response') : null),
+    [selectedTrace]
+  );
+
+  const copyTracePayload = useCallback(
+    async (payload: TracePayloadSnapshot | null) => {
+      if (!payload?.hasContent) return;
+      const copied = await copyToClipboard(payload.rawText);
+      showNotification(
+        copied
+          ? t('usage.trace_copy_success', { defaultValue: 'Copied to clipboard' })
+          : t('usage.trace_copy_failed', { defaultValue: 'Copy failed' }),
+        copied ? 'success' : 'error'
+      );
+    },
+    [showNotification, t]
   );
 
   const summary = useMemo(
@@ -933,28 +1045,202 @@ export function UsagePage() {
           t('usage.trace_detail_title', { defaultValue: 'Trace detail' })
         }
         onClose={() => setSelectedTrace(null)}
-        width={820}
+        width={1040}
       >
-        {selectedTrace && (
+        {selectedTrace && traceRequestPayload && traceResponsePayload && (
           <div className={styles.traceDetail}>
             {traceDetailLoading && (
               <div className={styles.loadingState}>
                 {t('common.loading', { defaultValue: 'Loading...' })}
               </div>
             )}
-            <div className={styles.traceDetailGrid}>
-              <span>request_id</span>
-              <strong>{selectedTrace.requestId || '-'}</strong>
-              <span>{t('usage.columns.credential', { defaultValue: 'Credential' })}</span>
-              <strong>{selectedTrace.credentialId || selectedTrace.authId || '-'}</strong>
-              <span>{t('usage.filters.status', { defaultValue: 'Status' })}</span>
-              <strong>{selectedTrace.status}</strong>
-              <span>{t('usage.trace_duration', { defaultValue: 'Duration' })}</span>
-              <strong>{formatDuration(selectedTrace.durationMs)}</strong>
-              <span>{t('usage.trace_time', { defaultValue: 'Time' })}</span>
-              <strong>{formatTraceTime(selectedTrace.createdAt)}</strong>
+            <div className={styles.traceOverviewGrid}>
+              <div className={styles.traceOverviewItem}>
+                <span>request_id</span>
+                <strong>{selectedTrace.requestId || '-'}</strong>
+              </div>
+              <div className={styles.traceOverviewItem}>
+                <span>{t('usage.columns.provider', { defaultValue: 'Provider' })}</span>
+                <strong>{selectedTrace.provider || '-'}</strong>
+              </div>
+              <div className={styles.traceOverviewItem}>
+                <span>{t('usage.columns.credential', { defaultValue: 'Credential' })}</span>
+                <strong>{selectedTrace.credentialId || selectedTrace.authId || '-'}</strong>
+              </div>
+              <div className={styles.traceOverviewItem}>
+                <span>{t('usage.filters.status', { defaultValue: 'Status' })}</span>
+                <strong>
+                  <span className={`${styles.statusBadge} ${styles[selectedTrace.status] ?? ''}`}>
+                    {t(`usage.status.${selectedTrace.status}`, {
+                      defaultValue: selectedTrace.status,
+                    })}
+                  </span>
+                </strong>
+              </div>
+              <div className={styles.traceOverviewItem}>
+                <span>{t('usage.trace_status_code', { defaultValue: 'Status code' })}</span>
+                <strong>{selectedTrace.responseStatus ?? selectedTrace.statusCode ?? '-'}</strong>
+              </div>
+              <div className={styles.traceOverviewItem}>
+                <span>{t('usage.trace_duration', { defaultValue: 'Duration' })}</span>
+                <strong>{formatDuration(selectedTrace.durationMs)}</strong>
+              </div>
+              <div className={styles.traceOverviewItem}>
+                <span>{t('usage.trace_time', { defaultValue: 'Time' })}</span>
+                <strong>{formatTraceTime(selectedTrace.createdAt)}</strong>
+              </div>
+              <div className={styles.traceOverviewItem}>
+                <span>{t('usage.trace_endpoint', { defaultValue: 'Endpoint' })}</span>
+                <strong>
+                  {[selectedTrace.method, selectedTrace.path].filter(Boolean).join(' ') ||
+                    selectedTrace.requestSummary ||
+                    '-'}
+                </strong>
+              </div>
             </div>
-            <pre>{toJsonPreview(selectedTrace.raw ?? selectedTrace)}</pre>
+
+            <section className={styles.traceSection}>
+              <div className={styles.traceSectionHeader}>
+                <div>
+                  <span className={styles.traceSectionEyebrow}>attempts</span>
+                  <h3>{t('usage.trace_attempts', { defaultValue: 'Retry attempts' })}</h3>
+                </div>
+                {selectedTrace.retryCredentialOrder.length > 0 && (
+                  <div className={styles.traceRetryOrder}>
+                    {selectedTrace.retryCredentialOrder.map((credential, index) => (
+                      <span key={`${credential}-${index}`}>{credential}</span>
+                    ))}
+                  </div>
+                )}
+              </div>
+              {selectedTrace.attempts && selectedTrace.attempts.length > 0 ? (
+                <div className={styles.traceAttemptList}>
+                  {selectedTrace.attempts.map((attempt, index) => {
+                    const statusKind = getAttemptStatusKind(attempt);
+                    const retryAfter = getAttemptRetryAfter(attempt);
+
+                    return (
+                      <div
+                        className={styles.traceAttemptRow}
+                        key={`${attempt.sequence}-${getAttemptCredential(attempt)}-${index}`}
+                      >
+                        <div className={styles.traceAttemptSeq}>
+                          #{attempt.sequence || index + 1}
+                        </div>
+                        <div className={styles.traceAttemptMain}>
+                          <strong>{getAttemptCredential(attempt)}</strong>
+                          <span>
+                            {attempt.provider || selectedTrace.provider || '-'}
+                            {attempt.model ? ` / ${attempt.model}` : ''}
+                            {attempt.upstreamModel || attempt.upstream_model
+                              ? ` -> ${attempt.upstreamModel || attempt.upstream_model}`
+                              : ''}
+                          </span>
+                        </div>
+                        <div className={styles.traceAttemptMeta}>
+                          <span
+                            className={`${styles.traceAttemptStatus} ${
+                              statusKind === 'success'
+                                ? styles.traceAttemptStatusSuccess
+                                : statusKind === 'failure'
+                                  ? styles.traceAttemptStatusFailure
+                                  : styles.traceAttemptStatusPending
+                            }`}
+                          >
+                            {t(`usage.status.${statusKind}`, { defaultValue: statusKind })}
+                          </span>
+                          <span>{getAttemptStatusCode(attempt) ?? '-'}</span>
+                          <span>{formatDuration(getAttemptDuration(attempt))}</span>
+                        </div>
+                        {(attempt.error || retryAfter !== null) && (
+                          <div className={styles.traceAttemptError}>
+                            {attempt.error || '-'}
+                            {retryAfter !== null && (
+                              <span>
+                                {t('usage.trace_retry_after', {
+                                  defaultValue: 'Retry after {{seconds}}s',
+                                  seconds: retryAfter,
+                                })}
+                              </span>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className={styles.traceDetailEmpty}>
+                  {t('usage.trace_attempts_empty', {
+                    defaultValue: 'No retry attempt details were recorded.',
+                  })}
+                </div>
+              )}
+            </section>
+
+            <div className={styles.tracePayloadGrid}>
+              <section className={styles.tracePayloadBlock}>
+                <div className={styles.tracePayloadHeader}>
+                  <div>
+                    <span className={styles.traceSectionEyebrow}>request</span>
+                    <h3>{t('usage.trace_raw_request', { defaultValue: 'Raw request' })}</h3>
+                  </div>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    disabled={!traceRequestPayload.hasContent}
+                    onClick={() => void copyTracePayload(traceRequestPayload)}
+                    className={styles.tracePayloadButton}
+                  >
+                    <span className={styles.buttonContent}>
+                      <IconCopy size={14} />
+                      {t('usage.trace_copy_request', { defaultValue: 'Copy raw request' })}
+                    </span>
+                  </Button>
+                </div>
+                <div className={styles.tracePayloadMeta}>
+                  <span>
+                    {t('usage.trace_size', { defaultValue: 'Size' })}:{' '}
+                    {formatPayloadSize(traceRequestPayload.size)}
+                  </span>
+                  {traceRequestPayload.truncated && (
+                    <span>{t('usage.trace_truncated', { defaultValue: 'Truncated' })}</span>
+                  )}
+                </div>
+                <pre className={styles.tracePayloadCode}>{traceRequestPayload.displayText}</pre>
+              </section>
+
+              <section className={styles.tracePayloadBlock}>
+                <div className={styles.tracePayloadHeader}>
+                  <div>
+                    <span className={styles.traceSectionEyebrow}>response</span>
+                    <h3>{t('usage.trace_raw_response', { defaultValue: 'Raw response' })}</h3>
+                  </div>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    disabled={!traceResponsePayload.hasContent}
+                    onClick={() => void copyTracePayload(traceResponsePayload)}
+                    className={styles.tracePayloadButton}
+                  >
+                    <span className={styles.buttonContent}>
+                      <IconCopy size={14} />
+                      {t('usage.trace_copy_response', { defaultValue: 'Copy raw response' })}
+                    </span>
+                  </Button>
+                </div>
+                <div className={styles.tracePayloadMeta}>
+                  <span>
+                    {t('usage.trace_size', { defaultValue: 'Size' })}:{' '}
+                    {formatPayloadSize(traceResponsePayload.size)}
+                  </span>
+                  {traceResponsePayload.truncated && (
+                    <span>{t('usage.trace_truncated', { defaultValue: 'Truncated' })}</span>
+                  )}
+                </div>
+                <pre className={styles.tracePayloadCode}>{traceResponsePayload.displayText}</pre>
+              </section>
+            </div>
           </div>
         )}
       </Modal>

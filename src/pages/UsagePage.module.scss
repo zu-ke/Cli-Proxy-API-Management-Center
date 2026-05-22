@@ -452,42 +452,241 @@
   display: flex;
   flex-direction: column;
   gap: $spacing-md;
-
-  pre {
-    max-height: 420px;
-    overflow: auto;
-    margin: 0;
-    padding: $spacing-md;
-    border: 1px solid var(--border-color);
-    border-radius: $radius-md;
-    background: var(--bg-secondary);
-    color: var(--text-primary);
-    font-size: 12px;
-    white-space: pre-wrap;
-    word-break: break-word;
-  }
 }
 
-.traceDetailGrid {
+.traceOverviewGrid {
   display: grid;
-  grid-template-columns: minmax(120px, 0.35fr) minmax(0, 1fr);
-  gap: 8px 12px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: $spacing-sm;
+}
+
+.traceOverviewItem {
+  min-width: 0;
   padding: $spacing-md;
   border: 1px solid var(--border-color);
   border-radius: $radius-md;
   background: var(--bg-secondary);
 
   span {
+    display: block;
+    margin-bottom: 6px;
     color: var(--text-tertiary);
     font-size: 12px;
   }
 
   strong {
-    min-width: 0;
+    display: block;
     overflow-wrap: anywhere;
     color: var(--text-primary);
     font-size: 13px;
   }
+}
+
+.traceSection,
+.tracePayloadBlock {
+  overflow: hidden;
+  border: 1px solid var(--border-color);
+  border-radius: $radius-md;
+  background: var(--bg-primary);
+}
+
+.traceSectionHeader,
+.tracePayloadHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: $spacing-md;
+  padding: $spacing-md;
+  border-bottom: 1px solid var(--border-color);
+  background: var(--bg-secondary);
+
+  h3 {
+    margin: 2px 0 0;
+    color: var(--text-primary);
+    font-size: 14px;
+    line-height: 1.35;
+  }
+}
+
+.traceSectionEyebrow {
+  color: var(--text-tertiary);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.traceRetryOrder {
+  display: flex;
+  flex: 1 1 auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+  min-width: 0;
+
+  span {
+    max-width: 220px;
+    overflow: hidden;
+    border: 1px solid var(--border-color);
+    border-radius: $radius-sm;
+    padding: 4px 7px;
+    background: var(--bg-primary);
+    color: var(--text-secondary);
+    font-size: 12px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
+.traceAttemptList {
+  display: flex;
+  flex-direction: column;
+}
+
+.traceAttemptRow {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr) auto;
+  gap: $spacing-sm $spacing-md;
+  align-items: center;
+  padding: $spacing-md;
+
+  + .traceAttemptRow {
+    border-top: 1px solid var(--border-color);
+  }
+}
+
+.traceAttemptSeq {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 28px;
+  border: 1px solid var(--border-color);
+  border-radius: $radius-sm;
+  background: var(--bg-secondary);
+  color: var(--text-tertiary);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.traceAttemptMain {
+  min-width: 0;
+
+  strong,
+  span {
+    display: block;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  strong {
+    color: var(--text-primary);
+    font-size: 13px;
+  }
+
+  span {
+    margin-top: 3px;
+    color: var(--text-secondary);
+    font-size: 12px;
+  }
+}
+
+.traceAttemptMeta {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+
+  span {
+    border: 1px solid var(--border-color);
+    border-radius: $radius-sm;
+    padding: 4px 7px;
+    color: var(--text-secondary);
+    font-size: 12px;
+  }
+}
+
+.traceAttemptStatusSuccess {
+  border-color: var(--success-badge-border) !important;
+  background: var(--success-badge-bg);
+  color: var(--success-badge-text) !important;
+}
+
+.traceAttemptStatusFailure {
+  border-color: var(--failure-badge-border) !important;
+  background: var(--failure-badge-bg);
+  color: var(--failure-badge-text) !important;
+}
+
+.traceAttemptStatusPending {
+  border-color: var(--warning-border) !important;
+  background: var(--warning-bg);
+  color: var(--warning-text) !important;
+}
+
+.traceAttemptError {
+  grid-column: 2 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: $spacing-sm;
+  min-width: 0;
+  color: var(--danger-color);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+
+  span {
+    color: var(--warning-text);
+  }
+}
+
+.traceDetailEmpty {
+  padding: $spacing-md;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.tracePayloadGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: $spacing-md;
+}
+
+.tracePayloadButton:global(.btn.btn-sm) {
+  flex: 0 0 auto;
+}
+
+.tracePayloadMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 10px $spacing-md;
+  border-bottom: 1px solid var(--border-color);
+
+  span {
+    border: 1px solid var(--border-color);
+    border-radius: $radius-sm;
+    padding: 3px 7px;
+    background: var(--bg-secondary);
+    color: var(--text-secondary);
+    font-size: 12px;
+  }
+}
+
+.tracePayloadCode {
+  max-height: 340px;
+  overflow: auto;
+  margin: 0;
+  padding: $spacing-md;
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  font-family: $font-mono;
+  font-size: 12px;
+  line-height: 1.55;
+  tab-size: 2;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 @include mobile {
@@ -519,6 +718,38 @@
 
   .traceDataRow {
     grid-template-columns: 1fr;
+  }
+
+  .traceOverviewGrid,
+  .tracePayloadGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .traceSectionHeader,
+  .tracePayloadHeader {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .traceRetryOrder {
+    justify-content: flex-start;
+  }
+
+  .traceAttemptRow {
+    grid-template-columns: 36px minmax(0, 1fr);
+  }
+
+  .traceAttemptMeta,
+  .traceAttemptError {
+    grid-column: 1 / -1;
+  }
+
+  .traceAttemptMeta {
+    justify-content: flex-start;
+  }
+
+  .tracePayloadButton:global(.btn.btn-sm) {
+    width: 100%;
   }
 
   .providerCell,
