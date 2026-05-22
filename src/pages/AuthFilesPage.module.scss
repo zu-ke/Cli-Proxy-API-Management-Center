@@ -380,15 +380,16 @@
 .fileGrid {
   display: grid;
   gap: $spacing-md;
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr));
+  align-items: start;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 380px), 1fr));
 }
 
 .fileGridQuotaManaged {
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 400px), 1fr));
 }
 
 .fileGridCompact {
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, 280px), 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr));
 }
 
 .antigravityGrid {
@@ -695,6 +696,7 @@
 .fileCard {
   position: relative;
   overflow: hidden;
+  align-self: start;
   background-color: color-mix(in srgb, var(--bg-primary) 85%, transparent);
   --glass-blur: 8px;
   backdrop-filter: var(--glass-backdrop-filter);
@@ -704,7 +706,7 @@
   padding: 16px;
   display: flex;
   flex-direction: column;
-  min-height: 100%;
+  min-height: auto;
   transition:
     transform $transition-fast,
     box-shadow $transition-fast,
@@ -848,7 +850,7 @@
   display: flex;
   align-items: stretch;
   gap: $spacing-md;
-  min-height: 100%;
+  min-height: auto;
 }
 
 .fileCardMain {
@@ -961,13 +963,14 @@
   font-size: 14px;
   font-weight: 800;
   color: var(--text-primary);
-  word-break: break-all;
+  word-break: normal;
+  overflow-wrap: anywhere;
   line-height: 1.4;
   display: -webkit-box;
   overflow: hidden;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
-  letter-spacing: -0.01em;
+  letter-spacing: 0;
 }
 
 .cardMeta {
@@ -1697,38 +1700,41 @@
 
 .batchActionContainer {
   position: static;
-  width: min(960px, calc(100vw - 24px));
-  max-width: calc(100vw - 24px);
-  margin: 0 auto $spacing-md;
+  width: 100%;
+  max-width: 100%;
+  margin: 0 0 $spacing-md;
   box-sizing: border-box;
 }
 
 .batchActionBar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: $spacing-sm;
-  padding: 10px 12px;
-  border-radius: $radius-lg;
-  border: 1px solid color-mix(in srgb, var(--border-color) 70%, transparent);
-  background: color-mix(in srgb, var(--bg-primary) 84%, transparent);
-  --glass-blur: 12px;
-  backdrop-filter: var(--glass-backdrop-filter);
-  -webkit-backdrop-filter: var(--glass-backdrop-filter);
-  box-shadow: var(--shadow-lg);
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+  padding: 12px;
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--border-color) 62%, transparent);
+  background:
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--primary-color) 5%, transparent),
+      transparent 52%
+    ),
+    color-mix(in srgb, var(--bg-secondary) 68%, transparent);
+  box-shadow: none;
 }
 
 .batchActionLeft,
 .batchActionRight {
   display: flex;
   align-items: center;
-  gap: $spacing-xs;
+  gap: 8px;
   flex-wrap: wrap;
 }
 
 .batchActionRight {
-  justify-content: flex-end;
+  justify-content: flex-start;
+  padding-top: 10px;
+  border-top: 1px dashed color-mix(in srgb, var(--border-color) 58%, transparent);
 }
 
 .batchQuotaStatus {

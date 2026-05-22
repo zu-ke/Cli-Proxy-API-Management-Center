@@ -1401,7 +1401,10 @@
       "success": "Success",
       "failure": "Failure",
       "mixed": "Mixed",
-      "idle": "Idle"
+      "idle": "Idle",
+      "retrying": "Retrying",
+      "pending": "Pending",
+      "unknown": "Unknown"
     },
     "sort": {
       "total": "Total volume",
@@ -1413,12 +1416,34 @@
       "provider": "Provider",
       "base_url": "base_url",
       "api_key": "API key",
+      "scope": "Scope",
+      "credential": "Credential",
       "success": "Success",
       "failed": "Failed",
       "total": "Total",
       "success_rate": "Rate",
       "trend": "Trend"
-    }
+    },
+    "views": {
+      "summary": "Usage summary",
+      "traces": "Request traces"
+    },
+    "source": {
+      "auth_file": "Auth",
+      "api_key": "Key"
+    },
+    "trace_search_placeholder": "Search request, credential, reason, or summary",
+    "trace_auto_refresh": "Poll refresh",
+    "trace_results": "{{count}} / {{total}} traces",
+    "trace_empty_title": "No request traces",
+    "trace_empty_desc": "Request trace records will appear after traffic is captured.",
+    "trace_retry_order": "Retry order",
+    "trace_duration": "Duration",
+    "trace_request_summary": "Request",
+    "trace_response_summary": "Response",
+    "trace_detail_title": "Trace detail",
+    "trace_detail_failed": "Failed to load trace detail",
+    "trace_time": "Time"
   },
   "notification": {
     "debug_updated": "Debug settings updated",

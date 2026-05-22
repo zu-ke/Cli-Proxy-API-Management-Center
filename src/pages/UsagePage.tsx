@@ -17,7 +17,12 @@ import { useHeaderRefresh } from '@/hooks/useHeaderRefresh';
 import { useInterval } from '@/hooks/useInterval';
 import { apiKeyUsageApi, authFilesApi, requestTracesApi } from '@/services/api';
 import { useAuthStore } from '@/stores';
-import type { AuthFileItem, RequestTraceDetail, RequestTraceStatus, RequestTraceSummary } from '@/types';
+import type {
+  AuthFileItem,
+  RequestTraceDetail,
+  RequestTraceStatus,
+  RequestTraceSummary,
+} from '@/types';
 import {
   normalizeRecentRequestUsageEntry,
   normalizeUsageTotal,
@@ -274,14 +279,7 @@ export function UsagePage() {
     } finally {
       setTracesLoading(false);
     }
-  }, [
-    disableControls,
-    searchParams,
-    searchQuery,
-    t,
-    traceProviderFilter,
-    traceStatusFilter,
-  ]);
+  }, [disableControls, searchParams, searchQuery, t, traceProviderFilter, traceStatusFilter]);
 
   useHeaderRefresh(view === 'traces' ? loadTraces : loadUsage);
 
@@ -492,8 +490,8 @@ export function UsagePage() {
         <Button
           variant="secondary"
           size="sm"
-          onClick={() => void loadUsage()}
-          loading={loading}
+          onClick={() => void (view === 'traces' ? loadTraces() : loadUsage())}
+          loading={view === 'traces' ? tracesLoading : loading}
           disabled={disableControls}
           className={styles.refreshButton}
         >
@@ -545,210 +543,216 @@ export function UsagePage() {
       <Card className={styles.usageCard}>
         {view === 'summary' ? (
           <>
-        <div className={styles.filters}>
-          <div className={styles.searchWrap}>
-            <Input
-              value={searchQuery}
-              onChange={(event) => setSearchQuery(event.target.value)}
-              placeholder={t('usage.search_placeholder', {
-                defaultValue: 'Search scope or credential',
-              })}
-              className={styles.searchInput}
-              rightElement={<IconSearch size={16} className={styles.searchIcon} />}
-            />
-          </div>
+            <div className={styles.filters}>
+              <div className={styles.searchWrap}>
+                <Input
+                  value={searchQuery}
+                  onChange={(event) => setSearchQuery(event.target.value)}
+                  placeholder={t('usage.search_placeholder', {
+                    defaultValue: 'Search scope or credential',
+                  })}
+                  className={styles.searchInput}
+                  rightElement={<IconSearch size={16} className={styles.searchIcon} />}
+                />
+              </div>
 
-          <div className={styles.selectWrap}>
-            <span className={styles.filterLabel}>
-              {t('usage.filters.provider', { defaultValue: 'Provider' })}
-            </span>
-            <Select
-              value={providerFilter}
-              options={providerOptions}
-              onChange={setProviderFilter}
-              ariaLabel={t('usage.filters.provider', { defaultValue: 'Provider' })}
-            />
-          </div>
+              <div className={styles.selectWrap}>
+                <span className={styles.filterLabel}>
+                  {t('usage.filters.provider', { defaultValue: 'Provider' })}
+                </span>
+                <Select
+                  value={providerFilter}
+                  options={providerOptions}
+                  onChange={setProviderFilter}
+                  ariaLabel={t('usage.filters.provider', { defaultValue: 'Provider' })}
+                />
+              </div>
 
-          <div className={styles.selectWrap}>
-            <span className={styles.filterLabel}>
-              {t('usage.filters.status', { defaultValue: 'Status' })}
-            </span>
-            <Select
-              value={statusFilter}
-              options={statusOptions}
-              onChange={(value) => setStatusFilter(value as UsageStatus | typeof ALL_VALUE)}
-              ariaLabel={t('usage.filters.status', { defaultValue: 'Status' })}
-            />
-          </div>
+              <div className={styles.selectWrap}>
+                <span className={styles.filterLabel}>
+                  {t('usage.filters.status', { defaultValue: 'Status' })}
+                </span>
+                <Select
+                  value={statusFilter}
+                  options={statusOptions}
+                  onChange={(value) => setStatusFilter(value as UsageStatus | typeof ALL_VALUE)}
+                  ariaLabel={t('usage.filters.status', { defaultValue: 'Status' })}
+                />
+              </div>
 
-          <div className={styles.selectWrap}>
-            <span className={styles.filterLabel}>
-              {t('usage.filters.sort', { defaultValue: 'Sort' })}
-            </span>
-            <Select
-              value={sortKey}
-              options={sortOptions}
-              onChange={(value) => setSortKey(value as SortKey)}
-              ariaLabel={t('usage.filters.sort', { defaultValue: 'Sort' })}
-            />
-          </div>
+              <div className={styles.selectWrap}>
+                <span className={styles.filterLabel}>
+                  {t('usage.filters.sort', { defaultValue: 'Sort' })}
+                </span>
+                <Select
+                  value={sortKey}
+                  options={sortOptions}
+                  onChange={(value) => setSortKey(value as SortKey)}
+                  ariaLabel={t('usage.filters.sort', { defaultValue: 'Sort' })}
+                />
+              </div>
 
-          <label className={styles.failedOnly}>
-            <input
-              type="checkbox"
-              checked={onlyFailed}
-              onChange={(event) => setOnlyFailed(event.target.checked)}
-            />
-            <span>{t('usage.filters.only_failed', { defaultValue: 'Only failed' })}</span>
-          </label>
-        </div>
-
-        <div className={styles.tableHeader}>
-          <span className={styles.tableTitle}>
-            <IconSlidersHorizontal size={16} />
-            {t('usage.results', {
-              count: filteredRows.length,
-              total: rows.length,
-              defaultValue: '{{count}} / {{total}} records',
-            })}
-          </span>
-          <span className={styles.tableHint}>
-            <IconChartLine size={15} />
-            {t('usage.trend_hint', { defaultValue: '20 recent buckets' })}
-          </span>
-        </div>
-
-        {loading && !hasRows ? (
-          <div className={styles.loadingState}>
-            {t('common.loading', { defaultValue: 'Loading...' })}
-          </div>
-        ) : !hasRows ? (
-          <EmptyState
-            title={t('usage.empty_title', { defaultValue: 'No usage records' })}
-            description={t('usage.empty_desc', {
-              defaultValue: 'Usage statistics will appear after credentials receive traffic.',
-            })}
-            action={
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={() => void loadUsage()}
-                disabled={disableControls}
-              >
-                {t('common.refresh', { defaultValue: 'Refresh' })}
-              </Button>
-            }
-          />
-        ) : isFilteredEmpty ? (
-          <EmptyState
-            title={t('usage.filtered_empty_title', { defaultValue: 'No matching records' })}
-            description={t('usage.filtered_empty_desc', {
-              defaultValue: 'Adjust provider, status, failure, or search filters.',
-            })}
-          />
-        ) : (
-          <div
-            className={styles.table}
-            role="table"
-            aria-label={t('usage.title', { defaultValue: 'Usage records' })}
-          >
-            <div className={styles.headRow} role="row">
-              <span role="columnheader">
-                {t('usage.columns.provider', { defaultValue: 'Provider' })}
-              </span>
-              <span role="columnheader">
-                {t('usage.columns.scope', { defaultValue: 'Scope' })}
-              </span>
-              <span role="columnheader">
-                {t('usage.columns.credential', { defaultValue: 'Credential' })}
-              </span>
-              <span role="columnheader">
-                {t('usage.columns.success', { defaultValue: 'Success' })}
-              </span>
-              <span role="columnheader">
-                {t('usage.columns.failed', { defaultValue: 'Failed' })}
-              </span>
-              <span role="columnheader">{t('usage.columns.total', { defaultValue: 'Total' })}</span>
-              <span role="columnheader">
-                {t('usage.columns.success_rate', { defaultValue: 'Rate' })}
-              </span>
-              <span role="columnheader">{t('usage.columns.trend', { defaultValue: 'Trend' })}</span>
+              <label className={styles.failedOnly}>
+                <input
+                  type="checkbox"
+                  checked={onlyFailed}
+                  onChange={(event) => setOnlyFailed(event.target.checked)}
+                />
+                <span>{t('usage.filters.only_failed', { defaultValue: 'Only failed' })}</span>
+              </label>
             </div>
 
-            {filteredRows.map((row) => (
-              <div className={styles.dataRow} role="row" key={row.id}>
-                <div className={styles.providerCell} role="cell">
-                  <span
-                    className={[styles.statusDot, styles[row.status]].join(' ')}
-                    aria-hidden="true"
-                  />
-                  <span className={styles.providerName}>{row.provider}</span>
-                  <span className={styles.sourceBadge}>
-                    {row.source === 'auth_file'
-                      ? t('usage.source.auth_file', { defaultValue: 'Auth' })
-                      : t('usage.source.api_key', { defaultValue: 'Key' })}
-                  </span>
-                  <span className={[styles.statusBadge, styles[row.status]].join(' ')}>
-                    {t(`usage.status.${row.status}`, {
-                      defaultValue: row.status,
-                    })}
-                  </span>
-                </div>
-                <div className={styles.urlCell} role="cell" title={row.baseUrl || '-'}>
-                  {row.baseUrl || '-'}
-                </div>
-                <div className={styles.keyCell} role="cell" title={row.maskedApiKey}>
-                  {row.maskedApiKey}
-                </div>
-                <div
-                  className={styles.numberCell}
-                  role="cell"
-                  data-label={t('usage.columns.success', { defaultValue: 'Success' })}
-                >
-                  {formatNumber(row.success)}
-                </div>
-                <div
-                  className={styles.numberCell}
-                  role="cell"
-                  data-label={t('usage.columns.failed', { defaultValue: 'Failed' })}
-                >
-                  {formatNumber(row.failed)}
-                </div>
-                <div
-                  className={styles.numberCell}
-                  role="cell"
-                  data-label={t('usage.columns.total', { defaultValue: 'Total' })}
-                >
-                  {formatNumber(row.total)}
-                </div>
-                <div
-                  className={styles.rateCell}
-                  role="cell"
-                  data-label={t('usage.columns.success_rate', { defaultValue: 'Rate' })}
-                >
-                  <span>{formatPercent(row.successRate)}</span>
-                  <span className={styles.rateTrack} aria-hidden="true">
-                    <span style={{ width: `${Math.min(100, Math.max(0, row.successRate))}%` }} />
-                  </span>
-                </div>
-                <div className={styles.trendCell} role="cell">
-                  {row.trendBlocks.map((block, index) => (
-                    <span
-                      key={`${row.id}-${index}`}
-                      className={[styles.trendBlock, styles[block]].join(' ')}
-                      title={t('usage.trend_block_title', {
-                        index: index + 1,
-                        state: block,
-                        defaultValue: 'Bucket {{index}}: {{state}}',
-                      })}
-                    />
-                  ))}
-                </div>
+            <div className={styles.tableHeader}>
+              <span className={styles.tableTitle}>
+                <IconSlidersHorizontal size={16} />
+                {t('usage.results', {
+                  count: filteredRows.length,
+                  total: rows.length,
+                  defaultValue: '{{count}} / {{total}} records',
+                })}
+              </span>
+              <span className={styles.tableHint}>
+                <IconChartLine size={15} />
+                {t('usage.trend_hint', { defaultValue: '20 recent buckets' })}
+              </span>
+            </div>
+
+            {loading && !hasRows ? (
+              <div className={styles.loadingState}>
+                {t('common.loading', { defaultValue: 'Loading...' })}
               </div>
-            ))}
-          </div>
-        )}
+            ) : !hasRows ? (
+              <EmptyState
+                title={t('usage.empty_title', { defaultValue: 'No usage records' })}
+                description={t('usage.empty_desc', {
+                  defaultValue: 'Usage statistics will appear after credentials receive traffic.',
+                })}
+                action={
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => void loadUsage()}
+                    disabled={disableControls}
+                  >
+                    {t('common.refresh', { defaultValue: 'Refresh' })}
+                  </Button>
+                }
+              />
+            ) : isFilteredEmpty ? (
+              <EmptyState
+                title={t('usage.filtered_empty_title', { defaultValue: 'No matching records' })}
+                description={t('usage.filtered_empty_desc', {
+                  defaultValue: 'Adjust provider, status, failure, or search filters.',
+                })}
+              />
+            ) : (
+              <div
+                className={styles.table}
+                role="table"
+                aria-label={t('usage.title', { defaultValue: 'Usage records' })}
+              >
+                <div className={styles.headRow} role="row">
+                  <span role="columnheader">
+                    {t('usage.columns.provider', { defaultValue: 'Provider' })}
+                  </span>
+                  <span role="columnheader">
+                    {t('usage.columns.scope', { defaultValue: 'Scope' })}
+                  </span>
+                  <span role="columnheader">
+                    {t('usage.columns.credential', { defaultValue: 'Credential' })}
+                  </span>
+                  <span role="columnheader">
+                    {t('usage.columns.success', { defaultValue: 'Success' })}
+                  </span>
+                  <span role="columnheader">
+                    {t('usage.columns.failed', { defaultValue: 'Failed' })}
+                  </span>
+                  <span role="columnheader">
+                    {t('usage.columns.total', { defaultValue: 'Total' })}
+                  </span>
+                  <span role="columnheader">
+                    {t('usage.columns.success_rate', { defaultValue: 'Rate' })}
+                  </span>
+                  <span role="columnheader">
+                    {t('usage.columns.trend', { defaultValue: 'Trend' })}
+                  </span>
+                </div>
+
+                {filteredRows.map((row) => (
+                  <div className={styles.dataRow} role="row" key={row.id}>
+                    <div className={styles.providerCell} role="cell">
+                      <span
+                        className={[styles.statusDot, styles[row.status]].join(' ')}
+                        aria-hidden="true"
+                      />
+                      <span className={styles.providerName}>{row.provider}</span>
+                      <span className={styles.sourceBadge}>
+                        {row.source === 'auth_file'
+                          ? t('usage.source.auth_file', { defaultValue: 'Auth' })
+                          : t('usage.source.api_key', { defaultValue: 'Key' })}
+                      </span>
+                      <span className={[styles.statusBadge, styles[row.status]].join(' ')}>
+                        {t(`usage.status.${row.status}`, {
+                          defaultValue: row.status,
+                        })}
+                      </span>
+                    </div>
+                    <div className={styles.urlCell} role="cell" title={row.baseUrl || '-'}>
+                      {row.baseUrl || '-'}
+                    </div>
+                    <div className={styles.keyCell} role="cell" title={row.maskedApiKey}>
+                      {row.maskedApiKey}
+                    </div>
+                    <div
+                      className={styles.numberCell}
+                      role="cell"
+                      data-label={t('usage.columns.success', { defaultValue: 'Success' })}
+                    >
+                      {formatNumber(row.success)}
+                    </div>
+                    <div
+                      className={styles.numberCell}
+                      role="cell"
+                      data-label={t('usage.columns.failed', { defaultValue: 'Failed' })}
+                    >
+                      {formatNumber(row.failed)}
+                    </div>
+                    <div
+                      className={styles.numberCell}
+                      role="cell"
+                      data-label={t('usage.columns.total', { defaultValue: 'Total' })}
+                    >
+                      {formatNumber(row.total)}
+                    </div>
+                    <div
+                      className={styles.rateCell}
+                      role="cell"
+                      data-label={t('usage.columns.success_rate', { defaultValue: 'Rate' })}
+                    >
+                      <span>{formatPercent(row.successRate)}</span>
+                      <span className={styles.rateTrack} aria-hidden="true">
+                        <span
+                          style={{ width: `${Math.min(100, Math.max(0, row.successRate))}%` }}
+                        />
+                      </span>
+                    </div>
+                    <div className={styles.trendCell} role="cell">
+                      {row.trendBlocks.map((block, index) => (
+                        <span
+                          key={`${row.id}-${index}`}
+                          className={[styles.trendBlock, styles[block]].join(' ')}
+                          title={t('usage.trend_block_title', {
+                            index: index + 1,
+                            state: block,
+                            defaultValue: 'Bucket {{index}}: {{state}}',
+                          })}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </>
         ) : (
           <>
@@ -862,14 +866,26 @@ export function UsagePage() {
                   <span role="columnheader" />
                 </div>
                 {filteredTraces.map((trace) => (
-                  <div className={`${styles.dataRow} ${styles.traceDataRow}`} role="row" key={trace.id}>
+                  <div
+                    className={`${styles.dataRow} ${styles.traceDataRow}`}
+                    role="row"
+                    key={trace.id}
+                  >
                     <div className={styles.keyCell} role="cell" title={trace.requestId}>
                       {trace.requestId || '-'}
                     </div>
-                    <div className={styles.keyCell} role="cell" title={trace.credentialId || trace.authId}>
+                    <div
+                      className={styles.keyCell}
+                      role="cell"
+                      title={trace.credentialId || trace.authId}
+                    >
                       {trace.credentialId || trace.authId || '-'}
                     </div>
-                    <div className={styles.urlCell} role="cell" title={trace.retryCredentialOrder.join(' -> ')}>
+                    <div
+                      className={styles.urlCell}
+                      role="cell"
+                      title={trace.retryCredentialOrder.join(' -> ')}
+                    >
                       {trace.retryCredentialOrder.length
                         ? trace.retryCredentialOrder.join(' -> ')
                         : '-'}
@@ -894,7 +910,11 @@ export function UsagePage() {
                       {trace.failureReason || trace.responseSummary || '-'}
                     </div>
                     <div className={styles.providerCell} role="cell">
-                      <Button variant="secondary" size="sm" onClick={() => void openTraceDetail(trace)}>
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        onClick={() => void openTraceDetail(trace)}
+                      >
                         {t('common.view', { defaultValue: 'View' })}
                       </Button>
                     </div>
@@ -908,7 +928,10 @@ export function UsagePage() {
 
       <Modal
         open={Boolean(selectedTrace)}
-        title={selectedTrace?.requestId || t('usage.trace_detail_title', { defaultValue: 'Trace detail' })}
+        title={
+          selectedTrace?.requestId ||
+          t('usage.trace_detail_title', { defaultValue: 'Trace detail' })
+        }
         onClose={() => setSelectedTrace(null)}
         width={820}
       >

@@ -1401,7 +1401,10 @@
       "success": "成功",
       "failure": "失败",
       "mixed": "混合",
-      "idle": "空闲"
+      "idle": "空闲",
+      "retrying": "重试中",
+      "pending": "进行中",
+      "unknown": "未知"
     },
     "sort": {
       "total": "总量",
@@ -1413,12 +1416,34 @@
       "provider": "提供商",
       "base_url": "base_url",
       "api_key": "API Key",
+      "scope": "范围",
+      "credential": "凭证",
       "success": "成功",
       "failed": "失败",
       "total": "总计",
       "success_rate": "成功率",
       "trend": "趋势"
-    }
+    },
+    "views": {
+      "summary": "用量汇总",
+      "traces": "请求追踪"
+    },
+    "source": {
+      "auth_file": "凭证",
+      "api_key": "Key"
+    },
+    "trace_search_placeholder": "搜索请求、凭证、失败原因或摘要",
+    "trace_auto_refresh": "轮询刷新",
+    "trace_results": "{{count}} / {{total}} 条追踪",
+    "trace_empty_title": "暂无请求追踪",
+    "trace_empty_desc": "捕获到真实流量后，请求链路会显示在这里。",
+    "trace_retry_order": "重试顺序",
+    "trace_duration": "耗时",
+    "trace_request_summary": "请求",
+    "trace_response_summary": "响应",
+    "trace_detail_title": "追踪详情",
+    "trace_detail_failed": "加载追踪详情失败",
+    "trace_time": "时间"
   },
   "notification": {
     "debug_updated": "调试设置已更新",

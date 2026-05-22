@@ -8,7 +8,7 @@ import type {
   RequestTraceAttempt,
 } from '@/types/requestTrace';
 
-const REQUEST_TRACES_ENDPOINT = '/v0/management/request-traces';
+const REQUEST_TRACES_ENDPOINT = '/request-traces';
 const REQUEST_TRACES_TIMEOUT_MS = 15 * 1000;
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -49,7 +49,9 @@ const readBoolean = (record: Record<string, unknown>, keys: string[]): boolean |
 };
 
 const normalizeStatus = (record: Record<string, unknown>): RequestTraceStatus => {
-  const status = String(record.status ?? '').trim().toLowerCase();
+  const status = String(record.status ?? '')
+    .trim()
+    .toLowerCase();
   if (status === 'success' || status === 'ok' || status === 'completed') return 'success';
   if (status === 'failure' || status === 'failed' || status === 'error') return 'failure';
   if (status === 'retrying' || status === 'retry') return 'retrying';
@@ -71,9 +73,7 @@ const normalizeStatus = (record: Record<string, unknown>): RequestTraceStatus =>
 
 const normalizeStringArray = (value: unknown): string[] => {
   if (!Array.isArray(value)) return [];
-  return value
-    .map((item) => String(item ?? '').trim())
-    .filter(Boolean);
+  return value.map((item) => String(item ?? '').trim()).filter(Boolean);
 };
 
 const readBodySnapshot = (value: unknown): unknown => {
@@ -99,13 +99,19 @@ const normalizeAttempts = (value: unknown): RequestTraceAttempt[] | undefined =>
     sequence: readNumber(item, ['sequence', 'index']) ?? 0,
     provider: readString(item, ['provider']),
     credential_id: readString(item, ['credential_id', 'credentialId', 'auth_id', 'authId']),
-    credential_index: readString(item, ['credential_index', 'credentialIndex', 'auth_index', 'authIndex']),
+    credential_index: readString(item, [
+      'credential_index',
+      'credentialIndex',
+      'auth_index',
+      'authIndex',
+    ]),
     model: readString(item, ['model']),
     upstream_model: readString(item, ['upstream_model', 'upstreamModel']),
     success: readBoolean(item, ['success']),
     status_code: readNumber(item, ['status_code', 'statusCode']) ?? undefined,
     error: readString(item, ['error']),
-    retry_after_seconds: readNumber(item, ['retry_after_seconds', 'retryAfterSeconds']) ?? undefined,
+    retry_after_seconds:
+      readNumber(item, ['retry_after_seconds', 'retryAfterSeconds']) ?? undefined,
     started_at: readString(item, ['started_at', 'startedAt']),
     finished_at: readString(item, ['finished_at', 'finishedAt']),
     duration_ms: readNumber(item, ['duration_ms', 'durationMs']) ?? undefined,
@@ -153,8 +159,12 @@ const normalizeTraceSummary = (value: unknown): RequestTraceSummary | null => {
         value.retry_auth_order
     ),
     requestSummary:
-      readString(value, ['request_preview', 'requestPreview', 'request_summary', 'requestSummary']) ||
-      stringifyBodyPreview(value.request),
+      readString(value, [
+        'request_preview',
+        'requestPreview',
+        'request_summary',
+        'requestSummary',
+      ]) || stringifyBodyPreview(value.request),
     responseSummary:
       readString(value, [
         'response_preview',
@@ -210,17 +220,16 @@ const normalizeTraceDetail = (value: unknown): RequestTraceDetail => {
 };
 
 const normalizeListResponse = (payload: unknown): RequestTraceListResponse => {
-  const source = isRecord(payload) ? payload.traces ?? payload.items ?? payload.data : payload;
+  const source = isRecord(payload) ? (payload.traces ?? payload.items ?? payload.data) : payload;
   const traces = Array.isArray(source)
-    ? source.map(normalizeTraceSummary).filter((trace): trace is RequestTraceSummary => Boolean(trace))
+    ? source
+        .map(normalizeTraceSummary)
+        .filter((trace): trace is RequestTraceSummary => Boolean(trace))
     : [];
 
   return {
     traces,
-    total:
-      isRecord(payload) && typeof payload.total === 'number'
-        ? payload.total
-        : traces.length,
+    total: isRecord(payload) && typeof payload.total === 'number' ? payload.total : traces.length,
   };
 };
 
